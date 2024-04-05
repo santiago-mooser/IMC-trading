@@ -13,6 +13,9 @@ https://github.com/ShubhamAnandJain/IMC-Prosperity-2023-Stanford-Cardinal
 ## Potential market-making strategies:
 https://github.com/Andrew-Lloy/Optimal-HFT-Guilbaud-Pham/blob/main/1106.5040.pdf
 
+## Example of previous year's results:
+https://github.com/nicolassinott/IMC_Prosperity/tree/main 
+
 ---
 
 # Last year's format:
