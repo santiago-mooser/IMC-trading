@@ -16,6 +16,9 @@ https://github.com/Andrew-Lloy/Optimal-HFT-Guilbaud-Pham/blob/main/1106.5040.pdf
 ## Example of previous year's results:
 https://github.com/nicolassinott/IMC_Prosperity/tree/main 
 
+## Trade visualizer (requires custom logging)
+https://jmerle.github.io/imc-prosperity-2-visualizer/
+
 ---
 
 # Last year's format:
