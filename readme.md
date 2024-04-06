@@ -22,6 +22,9 @@ https://jmerle.github.io/imc-prosperity-2-visualizer/
 ## Training a linear regression model
 https://www.alpharithms.com/predicting-stock-prices-with-linear-regression-214618/
 
+## Hidden markov chains in python
+https://medium.com/@natsunoyuki/hidden-markov-models-with-python-c026f778dfa7
+
 ---
 
 # Last year's format:
