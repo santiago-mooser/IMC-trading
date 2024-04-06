@@ -25,12 +25,6 @@ DEFAULT_PRICES = {
 }
 
 EMA_PARAM = 0.29
-STARFRUIT_BASE_SPREAD_STD = 2.383
-STARFRUIT_BASE_SPREAD_MEAN = 6.2651
-STARFRUIT_BASE_SPREAD_COEFF = 0.1
-STARFRUIT_BASE_SPREAD_DIVIATION_COEFF = 1 # Should be between 0 and 1
-
-WINDOW_LENGTH = 10
 
 class Trader:
     def __init__(self) -> None:
@@ -43,13 +37,6 @@ class Trader:
         self.cash = 0
         self.timestamp = 0
 
-        self.window_length = WINDOW_LENGTH
-
-        # parameters to compute the next price of STARFRUIT
-        self.starfruit_spread_std = STARFRUIT_BASE_SPREAD_STD
-        self.starfruit_spread_mean = STARFRUIT_BASE_SPREAD_MEAN
-        self.starfruit_spread_coeff = STARFRUIT_BASE_SPREAD_COEFF
-        self.starfruit_spread_deviation_coeff = STARFRUIT_BASE_SPREAD_DIVIATION_COEFF
 
         self.logger = Logger()
 
@@ -171,55 +158,6 @@ class Trader:
         if product == STARFRUIT:
             return self.starfruit_strategy(state)
 
-    def compute_spread(self, order_depth: OrderDepth) -> float:
-        """
-        Calculate the spread of the order depth.
-        """
-        market_bids = order_depth.buy_orders
-        if len(market_bids) == 0:
-            return None
-
-        market_asks = order_depth.sell_orders
-        if len(market_asks) == 0:
-            return None
-
-        best_bid = max(market_bids)
-        best_ask = min(market_asks)
-        return best_ask - best_bid
-
-    def compute_volatility(self, symbol: Symbol, state : TradingState) -> Tuple[float, float]:
-        """
-        Calculate the volatility of the price of a product.
-        """
-        if len(self.past_order_depths[symbol]) < self.window_length:
-            return self.starfruit_spread_mean, self.starfruit_spread_std
-
-        # calculate volatility based on the spread in the last 10 order depths
-        spread = 0
-
-        for order_depth in self.past_order_depths[symbol]:
-            market_bids = order_depth.buy_orders
-            if len(market_bids) == 0:
-                continue
-
-            market_asks = order_depth.sell_orders
-            if len(market_asks) == 0:
-                continue
-
-            best_bid = max(market_bids)
-            best_ask = min(market_asks)
-            spread += best_ask - best_bid
-
-        average_spread = spread / len(self.past_order_depths[symbol])
-
-        spreads = [self.compute_spread(order_depth) for order_depth in self.past_order_depths[symbol]]
-
-        spreads = [spread for spread in spreads if spread is not None]
-        # calculate standard deviation
-        standard_deviation = statistics.stdev(spreads)
-
-        return average_spread, standard_deviation
-
 
     def starfruit_strategy(self, state : TradingState) -> List[Order]:
         """
@@ -233,49 +171,72 @@ class Trader:
         max_bid = min(state.order_depths[STARFRUIT].buy_orders, key=state.order_depths[STARFRUIT].buy_orders.get)
         min_ask = max(state.order_depths[STARFRUIT].sell_orders, key=state.order_depths[STARFRUIT].sell_orders.get)
 
-        # get the volatility and standard deviation from the previous 10 order depths
-        average_spread, standard_deviation = self.compute_volatility(STARFRUIT, state)
+        # # get the volatility and standard deviation from the previous 10 order depths
+        # average_spread, standard_deviation = self.compute_volatility(STARFRUIT, state)
 
-        # Now calculate how many standard deviations from the mean the spread is
-        current_spread = min_ask - max_bid
-        if standard_deviation == 0:
-            standard_deviation = self.starfruit_spread_std
-        spread_deviation = (average_spread - current_spread) / standard_deviation
+        # # Now calculate how many standard deviations from the mean the spread is
+        # current_spread = min_ask - max_bid
+        # if standard_deviation == 0:
+        #     standard_deviation = self.starfruit_spread_std
+        # spread_deviation = (average_spread - current_spread) / standard_deviation
 
-        print(f"spread deviation: {spread_deviation}")
+        # # print(f"spread deviation: {spread_deviation}")
 
-        # Adjust spread based on volatility
-        dynamic_spread = self.starfruit_spread_mean*(1-len(self.past_order_depths[STARFRUIT])/10) + (spread_deviation*self.starfruit_spread_deviation_coeff+average_spread*self.starfruit_spread_coeff)*len(self.past_order_depths[STARFRUIT])/10
+        # # Adjust spread based on volatility
+        # # self.starfruit_spread_mean*(1-len(self.past_order_depths[STARFRUIT])/10) +
+        # # dynamic_spread = (spread_deviation*self.starfruit_spread_deviation_coeff+average_spread*self.starfruit_spread_coeff)*len(self.past_order_depths[STARFRUIT])/10
 
-        mid_price = self.get_mid_price(STARFRUIT, state)
-        bid_price = math.ceil(mid_price - dynamic_spread/2)
-        ask_price = math.floor(mid_price + dynamic_spread/2)
-
-        print(f"mid price: {mid_price}")
-        print(f"bid price: {bid_price}")
-        print(f"ask price: {ask_price}")
-        print(f"average spread: {average_spread}")
-        print(f"standard deviation: {standard_deviation}")
-        print(f"dynamic spread: {dynamic_spread}")
-        print(f"current spread: {current_spread}")
+        # dynamic_spread = max(min(spread_deviation/8, -1), 1)
 
         orders = []
 
         if position_starfruit == 0:
+            bid_price = round(self.ema_prices[STARFRUIT] - 1)
+            ask_price = round(self.ema_prices[STARFRUIT] + 1)
+
+            if bid_price == ask_price or bid_price > ask_price:
+                ask_price += 1
+                bid_price -= 1
+
+
             # Not long nor short
-            orders.append(Order(STARFRUIT, math.floor(self.ema_prices[STARFRUIT] - dynamic_spread), bid_volume))
-            orders.append(Order(STARFRUIT, math.ceil(self.ema_prices[STARFRUIT] + dynamic_spread/2), ask_volume))
+            orders.append(Order(STARFRUIT, bid_price, bid_volume))
+            orders.append(Order(STARFRUIT, ask_price, ask_volume))
 
         if position_starfruit > 0:
+            bid_price = round(self.ema_prices[STARFRUIT] - 1)
+            ask_price = round(self.ema_prices[STARFRUIT])
+
+
+            if bid_price == ask_price or bid_price > ask_price:
+                ask_price += 1
+
             # Long position
-            orders.append(Order(STARFRUIT, math.floor(self.ema_prices[STARFRUIT] - dynamic_spread/2), bid_volume))
-            orders.append(Order(STARFRUIT, math.ceil(self.ema_prices[STARFRUIT]), ask_volume))
+            orders.append(Order(STARFRUIT, bid_price, bid_volume))
+            orders.append(Order(STARFRUIT, ask_price, ask_volume))
+
+            #If there are any asks below ema, create a buy order for all of them
+            for ask in state.order_depths[STARFRUIT].sell_orders:
+                if ask < self.ema_prices[STARFRUIT]:
+                    orders.append(Order(STARFRUIT, ask, -state.order_depths[STARFRUIT].sell_orders[ask]))
 
         if position_starfruit < 0:
-            # Short position
-            orders.append(Order(STARFRUIT, math.floor(self.ema_prices[STARFRUIT]), bid_volume))
-            orders.append(Order(STARFRUIT, math.ceil(self.ema_prices[STARFRUIT] + dynamic_spread/2), ask_volume))
 
+            bid_price = round(self.ema_prices[STARFRUIT])
+            ask_price = round(self.ema_prices[STARFRUIT])
+
+            if bid_price == ask_price or bid_price > ask_price:
+                bid_price -= 1
+
+
+            # Short position
+            orders.append(Order(STARFRUIT, bid_price, bid_volume))
+            orders.append(Order(STARFRUIT, ask_price, ask_volume))
+
+            # Also, if there are any bids above ema, create a sell order for all of them
+            for bid in state.order_depths[STARFRUIT].buy_orders:
+                if bid > self.ema_prices[STARFRUIT]:
+                    orders.append(Order(STARFRUIT, bid, state.order_depths[STARFRUIT].buy_orders[bid]))
 
         return orders
 
@@ -286,12 +247,8 @@ class Trader:
         bids_above_default = [bid for bid in state.order_depths[AMETHYSTS].buy_orders if bid > DEFAULT_PRICES[AMETHYSTS]]
         asks_below_default = [ask for ask in state.order_depths[AMETHYSTS].sell_orders if ask < DEFAULT_PRICES[AMETHYSTS]]
 
-        max_bid = min(state.order_depths[AMETHYSTS].buy_orders, key=state.order_depths[AMETHYSTS].buy_orders.get)
-        min_ask = max(state.order_depths[AMETHYSTS].sell_orders, key=state.order_depths[AMETHYSTS].sell_orders.get)
-
         bid_volume = self.position_limit[AMETHYSTS] - position_amethysts
         ask_volume = - self.position_limit[AMETHYSTS] - position_amethysts
-
 
         orders.append(Order(AMETHYSTS, DEFAULT_PRICES[AMETHYSTS] - 1, bid_volume))
         orders.append(Order(AMETHYSTS, DEFAULT_PRICES[AMETHYSTS] + 1, ask_volume))
