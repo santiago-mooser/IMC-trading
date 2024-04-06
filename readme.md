@@ -19,6 +19,9 @@ https://github.com/nicolassinott/IMC_Prosperity/tree/main
 ## Trade visualizer (requires custom logging)
 https://jmerle.github.io/imc-prosperity-2-visualizer/
 
+## Training a linear regression model
+https://www.alpharithms.com/predicting-stock-prices-with-linear-regression-214618/
+
 ---
 
 # Last year's format:
