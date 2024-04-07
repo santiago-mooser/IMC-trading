@@ -29,9 +29,9 @@ DEFAULT_PRICES = {
 }
 
 # Variables to keep track of the exponential moving average of the prices
-EMA_PARAM = 0.39
+EMA_PARAM = 0.29
 PRODUCT_EMA_ENABLED = {
-    AMETHYSTS : False,
+    AMETHYSTS : True,
     STARFRUIT : True,
 }
 
@@ -78,6 +78,7 @@ class Trader:
         traderData = state.traderData
         self.timestamp = state.timestamp
         self.position = state.position
+        self.update_ema_prices(state)
 
         # Orders to be placed on exchange matching engine
         for product in state.order_depths:
@@ -85,9 +86,6 @@ class Trader:
             # If the product is disabled, quickly skip to the next product
             if not self.product_enabled[product]:
                 continue
-
-            if self.ema_enabled[product]:
-                self.update_ema_prices(state, product)
 
             # Initialize a new list of orders for the given product
             orders: List[Order] = []
@@ -150,9 +148,6 @@ class Trader:
         bid_volume = self.position_limit[STARFRUIT] - position_starfruit
         ask_volume = - self.position_limit[STARFRUIT] - position_starfruit
 
-        max_bid = min(state.order_depths[STARFRUIT].buy_orders, key=state.order_depths[STARFRUIT].buy_orders.get)
-        min_ask = max(state.order_depths[STARFRUIT].sell_orders, key=state.order_depths[STARFRUIT].sell_orders.get)
-
         orders = []
 
         if position_starfruit == 0:
@@ -181,7 +176,7 @@ class Trader:
             orders.append(Order(STARFRUIT, bid_price, bid_volume))
             orders.append(Order(STARFRUIT, ask_price, ask_volume))
 
-            #If there are any asks below ema, create a buy order for all of them
+            # If there are any asks below ema, create a buy order for all of them
             for ask in state.order_depths[STARFRUIT].sell_orders:
                 if ask < self.ema_prices[STARFRUIT]:
                     orders.append(Order(STARFRUIT, ask, -state.order_depths[STARFRUIT].sell_orders[ask]))
@@ -272,20 +267,22 @@ class Trader:
         best_ask = min(market_asks)
         return (best_bid + best_ask)/2
 
-    def update_ema_prices(self, state : TradingState, product):
+    def update_ema_prices(self, state : TradingState):
         """
         Update the exponential moving average of the prices of each product.
         """
+        for product in PRODUCTS:
+            if not self.ema_enabled[product]:
+                continue
+            mid_price = self.get_mid_price(product, state)
+            if mid_price is None:
+                continue
 
-        mid_price = self.get_mid_price(product, state)
-        if mid_price is None:
-            return
-
-        # Update ema price
-        if self.ema_prices[product] is None:
-            self.ema_prices[product] = mid_price
-        else:
-            self.ema_prices[product] = self.ema_param * mid_price + (1-self.ema_param) * self.ema_prices[product]
+            # Update ema price
+            if self.ema_prices[product] is None:
+                self.ema_prices[product] = mid_price
+            else:
+                self.ema_prices[product] = self.ema_param * mid_price + (1-self.ema_param) * self.ema_prices[product]
 
     def update_sma_prices(self, state : TradingState):
         """
