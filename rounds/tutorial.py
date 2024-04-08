@@ -35,6 +35,12 @@ PRODUCT_EMA_ENABLED = {
     STARFRUIT : True,
 }
 
+# Variable for VWAP
+PRODUCT_VWAP_ENABLED = {
+    AMETHYSTS : True,
+    STARFRUIT : True,
+}
+
 class Trader:
 
     def __init__(self) -> None:
@@ -48,6 +54,7 @@ class Trader:
         self.position_limit = POSITION_LIMIT
         self.product_enabled = PRODUCT_ENABLED
         self.ema_enabled = PRODUCT_EMA_ENABLED
+        self.vwap_enabled = PRODUCT_VWAP_ENABLED
 
         # Variables used for strategies
         # self.past_order_depths keeps the list of all past prices, used in some strategies
@@ -58,10 +65,13 @@ class Trader:
         self.ema_prices = dict()
         self.ema_param = EMA_PARAM
         self.sma_prices = dict()
+        self.vwap = dict()
         for product in self.ema_enabled:
             self.ema_prices[product] = None
             self.sma_prices[product] = DEFAULT_PRICES[product]
-
+        for product in self.vwap_enabled:
+            self.vwap[product] = DEFAULT_PRICES[product]
+        
         # Variables for logging
         self.timestamp = 0
         self.logger = Logger()
@@ -243,7 +253,30 @@ class Trader:
 
     def get_position(self, product, state : TradingState) -> int:
         return state.position.get(product, 0)
+    
+    def update_vwap(self, state : TradingState):
+        """
+        Volume-Weighted Average Price
+        calculate from all the trades happened from last iteration
+        """
+        
+        for product in PRODUCTS:
+            if not self.vwap_enabled[product]:
+                continue
+            total_value = 0
+            total_volume = 0
+            market_trades = state.market_trades[product]
+            
+            for trade in market_trades:
+                total_value += trade.price * trade.quantity
+                total_volume += trade.quantity
 
+            # Ensure we don't divide by zero in case of no trades
+            if total_volume != 0:
+                vwap = total_value / total_volume
+                self.vwap[product] = vwap
+    
+    
     def get_mid_price(self, product, state : TradingState) -> float:
 
         default_price = self.ema_prices[product]
