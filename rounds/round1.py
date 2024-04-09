@@ -10,7 +10,7 @@ AMETHYSTS = "AMETHYSTS"
 STARFRUIT = "STARFRUIT"
 PRODUCTS = [AMETHYSTS, STARFRUIT]
 PRODUCT_ENABLED = {
-    AMETHYSTS : True,
+    AMETHYSTS : False,
     STARFRUIT : True,
 }
 # Position limit for each product
@@ -29,6 +29,12 @@ DEFAULT_PRICES = {
 }
 
 # Variables to keep track of the exponential moving average of the prices
+NUM_PERIODS_FAST = 5 # Static time period parameter for the fast EMA
+K_FAST = 2 / (NUM_PERIODS_FAST + 1) # Static smoothing factor parameter for fast EMA
+
+NUM_PERIODS_SLOW = 10 # Static time period parameter for slow EMA
+K_SLOW = 2 / (NUM_PERIODS_SLOW + 1) # Static smoothing factor parameter for slow EMA
+
 EMA_PARAM = 0.29
 PRODUCT_EMA_ENABLED = {
     AMETHYSTS : True,
@@ -55,25 +61,33 @@ class Trader:
         self.product_enabled = PRODUCT_ENABLED
         self.ema_enabled = PRODUCT_EMA_ENABLED
         self.vwap_enabled = PRODUCT_VWAP_ENABLED
-
+        self.avg_cost = dict()
+        self.amethysts_positions = dict()
+        self.imbalance = 0
+        
         # Variables used for strategies
         # self.past_order_depths keeps the list of all past prices, used in some strategies
         self.past_order_depths = dict()
         for product in PRODUCTS:
             self.past_order_depths[product] = []
+            self.avg_cost[product] = 0
         # self.ema_prices keeps an exponential moving average of prices for each product
         self.ema_prices = dict()
         self.ema_param = EMA_PARAM
         self.sma_prices = dict()
+        self.ema_fast = dict()
+        self.ema_slow = dict()
         self.vwap = dict()
         for product in self.ema_enabled:
             self.ema_prices[product] = None
             self.sma_prices[product] = DEFAULT_PRICES[product]
+            self.ema_fast[product] = None
+            self.ema_slow[product] = None
         for product in self.vwap_enabled:
             self.vwap[product] = DEFAULT_PRICES[product]
             self.total_value = dict()
             self.total_volume = dict()
-        
+
         # Variables for logging
         self.timestamp = 0
         self.logger = Logger()
@@ -165,21 +179,30 @@ class Trader:
         orders = []
         sell_orders = state.order_depths[STARFRUIT].sell_orders
         buy_orders = state.order_depths[STARFRUIT].buy_orders
-        
-        if len(sell_orders) == 0 or len(buy_orders) == 0:
-            return orders
-        
+        total_bid_volume = sum([order[1] for order in buy_orders.items()])
+        total_ask_volume = sum([order[1] for order in sell_orders.items()])
+        if (total_bid_volume + total_ask_volume) !=0:
+            self.imbalance = (total_bid_volume - total_ask_volume) / (total_bid_volume + total_ask_volume)
+                
         # assume the vwap is the fair price
-        if len(state.order_depths[STARFRUIT].sell_orders) != 0:
-            best_ask, best_ask_amount = list(state.order_depths[STARFRUIT].sell_orders.items())[0]
-            if int(best_ask) < self.vwap[STARFRUIT]:
-                # BUY
-                orders.append(Order(product, best_ask, bid_volume))
-        if len(state.order_depths[STARFRUIT].buy_orders) != 0:
-            best_bid, best_bid_amount = list(state.order_depths[STARFRUIT].buy_orders.items())[0]
-            if int(best_bid) > self.vwap[STARFRUIT]:
-                # SELL
-                orders.append(Order(product, best_bid, ask_volume))                    
+        best_ask, best_ask_amount = list(state.order_depths[STARFRUIT].sell_orders.items())[0]
+        best_bid, best_bid_amount = list(state.order_depths[STARFRUIT].buy_orders.items())[0]
+        mid = round(self.get_mid_price(STARFRUIT, state))
+        
+        if self.imbalance > 0.1 and self.ema_slow[STARFRUIT] < self.ema_fast[STARFRUIT]:
+            orders.append(Order(product, best_ask, bid_volume))
+        elif self.imbalance < -0.1 and self.ema_slow[STARFRUIT] > self.ema_fast[STARFRUIT]: 
+             
+            orders.append(Order(product, best_bid, ask_volume))
+            
+
+        # if int(best_ask) < self.vwap[STARFRUIT]:
+        #     # BUY
+        #     orders.append(Order(product, best_ask, bid_volume))
+        
+        # if int(best_bid) > self.vwap[STARFRUIT]:
+        #     # SELL
+        #     orders.append(Order(product, best_bid, ask_volume))                    
 
         return orders
 
@@ -191,9 +214,23 @@ class Trader:
         Since we're not playing against other players, we probably don't need to force a strictly
         winning strategy (i.e. always +1 or -1 from the default price) but we can just buy/sell
         whatever is available., which should give us more profits.
+        testing results: 242
         """
+        
+        for trade in state.own_trades.get(AMETHYSTS, []):
+            if trade.buyer == 'SUBMISSION':
+                self.amethysts_positions[trade.price] = self.amethysts_positions.get(trade.price, 0 )  + trade.quantity
+            else:
+                self.amethysts_positions[trade.price] = self.amethysts_positions.get(trade.price, 0 )  - trade.quantity
+            
         orders = []
         position_amethysts = self.get_position(AMETHYSTS, state)
+        # for k, v in self.amethysts_positions.items():
+        #     if k < DEFAULT_PRICES[AMETHYSTS]:
+        #         orders.append(Order(AMETHYSTS, k + 1, -v))
+        #     if k > DEFAULT_PRICES[AMETHYSTS]:
+        #         orders.append(Order(AMETHYSTS, k - 1, -v))
+
 
         bids_above_default = [bid for bid in state.order_depths[AMETHYSTS].buy_orders if bid > DEFAULT_PRICES[AMETHYSTS]]
         asks_below_default = [ask for ask in state.order_depths[AMETHYSTS].sell_orders if ask < DEFAULT_PRICES[AMETHYSTS]]
@@ -201,16 +238,16 @@ class Trader:
         bid_volume = self.position_limit[AMETHYSTS] - position_amethysts
         ask_volume = - self.position_limit[AMETHYSTS] - position_amethysts
 
-        orders.append(Order(AMETHYSTS, DEFAULT_PRICES[AMETHYSTS] - 1, bid_volume))
-        orders.append(Order(AMETHYSTS, DEFAULT_PRICES[AMETHYSTS] + 1, ask_volume))
+        orders.append(Order(AMETHYSTS, round(DEFAULT_PRICES[AMETHYSTS],0) - 1, bid_volume))
+        orders.append(Order(AMETHYSTS, round(DEFAULT_PRICES[AMETHYSTS],0) + 1, ask_volume))
 
-        # If there are any bids above the default price, create a buy order for all of them
-        for bid in bids_above_default:
-            orders.append(Order(AMETHYSTS, bid, state.order_depths[AMETHYSTS].buy_orders[bid]))
+        # # If there are any bids above the default price, create a buy order for all of them
+        # for bid in bids_above_default:
+        #     orders.append(Order(AMETHYSTS, bid, state.order_depths[AMETHYSTS].buy_orders[bid]))
 
-        # If there are any asks below the default price, create a sell order for all of them
-        for ask in asks_below_default:
-            orders.append(Order(AMETHYSTS, ask, -state.order_depths[AMETHYSTS].sell_orders[ask]))
+        # # If there are any asks below the default price, create a sell order for all of them
+        # for ask in asks_below_default:
+        #     orders.append(Order(AMETHYSTS, ask, -state.order_depths[AMETHYSTS].sell_orders[ask]))
 
         return orders
 
@@ -287,8 +324,13 @@ class Trader:
             # Update ema price
             if self.ema_prices[product] is None:
                 self.ema_prices[product] = mid_price
+                self.ema_fast[product] = mid_price
+                self.ema_slow[product] = mid_price
+                
             else:
                 self.ema_prices[product] = self.ema_param * mid_price + (1-self.ema_param) * self.ema_prices[product]
+                self.ema_fast[product] = K_FAST * mid_price + (1-K_FAST) * self.ema_fast[product]
+                self.ema_slow[product] = K_SLOW * mid_price + (1-K_SLOW) * self.ema_slow[product]
 
     def update_sma_prices(self, state : TradingState):
         """
