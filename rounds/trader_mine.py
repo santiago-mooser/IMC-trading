@@ -86,21 +86,43 @@ class CrossStrategy(Strategy):
         self.old_bids = []
         self.min_req_price_difference = min_req_price_difference
         
+        # try the imbalance indicator: (total_bid_vol - total_ask_vol)/ (total_bid_vol + total_ask_vol), pos if bid vol is higher
         self.imbalance = 0
+        self.direction = 0
         
     def trade(self, trading_state: TradingState, orders: list):
         order_depth: OrderDepth = trading_state.order_depths[self.name]
         self.cache_prices(order_depth)
         if len(self.old_asks) < self.strategy_start_day or len(self.old_bids) < self.strategy_start_day:
             return
-
+        
         avg_bid, avg_ask = self.calculate_prices(self.strategy_start_day)
-
+        curr_imbalance =  0 #self.calculate_imbalance(self.strategy_start_day)
+        if curr_imbalance > self.imbalance:
+            # we may track the changes of the imbalance 
+            pass
+        
+        if curr_imbalance > 0.25:
+            self.direction = 3
+        elif curr_imbalance < -0.25:
+            self.direction = -3
+        else:
+            self.direction = 0
+        # update imbalance
+        self.imbalance = curr_imbalance
+        
+        bid_volume = self.max_pos - self.prod_position 
+        ask_volume = -self.max_pos - self.prod_position 
+        #buy order 
+        # orders.append(Order(self.name, int(avg_bid + self.min_req_price_difference + self.direction), bid_volume))
+        # #sell order 
+        # orders.append(Order(self.name, int(avg_ask - self.min_req_price_difference + self.direction), ask_volume))        
+        
         if len(order_depth.sell_orders) != 0:
             best_asks = sorted(order_depth.sell_orders.keys())
 
             i = 0
-            while i < self.trade_count and len(best_asks) > i and best_asks[i] - avg_bid <= self.min_req_price_difference:
+            while i < self.trade_count and len(best_asks) > i and best_asks[i] - avg_bid <= self.min_req_price_difference + self.direction:
                 if self.prod_position == self.max_pos:
                     break
                 self.buy_product(best_asks, i, order_depth, orders)
@@ -112,7 +134,7 @@ class CrossStrategy(Strategy):
 
             i = 0
             # Check if the lowest bid (buy order) is lower than the above defined fair value
-            while i < self.trade_count and len(best_bids) > i and avg_ask - best_bids[i] <= self.min_req_price_difference:
+            while i < self.trade_count and len(best_bids) > i and avg_ask - best_bids[i] <= self.min_req_price_difference + self.direction:
                 if self.prod_position == -self.max_pos:
                     break
                 self.sell_product(best_bids, i, order_depth, orders)
@@ -134,8 +156,8 @@ class CrossStrategy(Strategy):
 
         return avg_bid, avg_ask
     
-    def calculate_imbalance(self, days: int):
-        # Calculate the average bid and ask price for the last days
+    def calculate_imbalance(self, days: int) -> float:
+        # Calculate the imbalance for the last days
 
         relevant_bids = []
         for bids in self.old_bids[-days:]:
@@ -144,9 +166,10 @@ class CrossStrategy(Strategy):
         for asks in self.old_asks[-days:]:
             relevant_asks.extend([(value, asks[value]) for value in asks])
 
-        bid_vol = np.sum([x[1] for x in relevant_bids])
-        ask_vol = np.sum([x[1] for x in relevant_asks])
-        self.imbalance = (bid_vol - ask_vol)/ (bid_vol + ask_vol)
+        bid_vol = sum([x[1] for x in relevant_bids])
+        ask_vol = sum([x[1] for x in relevant_asks])
+        imbalance = (bid_vol - ask_vol)/ (bid_vol + ask_vol)
+        return imbalance
 
     def cache_prices(self, order_depth: OrderDepth):
         sell_orders = order_depth.sell_orders
@@ -361,7 +384,7 @@ class Trader:
 
     def __init__(self) -> None:
         self.products = {
-            # "STARFRUIT": Starfruit(),
+            "STARFRUIT": Starfruit(),
             "AMETHYSTS": Amethysts()
         }
         self.logger = Logger()
