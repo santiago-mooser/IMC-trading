@@ -89,6 +89,7 @@ class CrossStrategy(Strategy):
         # try the imbalance indicator: (total_bid_vol - total_ask_vol)/ (total_bid_vol + total_ask_vol), pos if bid vol is higher
         self.imbalance = 0
         self.direction = 0
+        self.mm = StoikovMarketMaker(0.5, 5,0,20)
         
     def trade(self, trading_state: TradingState, orders: list):
         order_depth: OrderDepth = trading_state.order_depths[self.name]
@@ -103,9 +104,9 @@ class CrossStrategy(Strategy):
             pass
         
         if curr_imbalance > 0.25:
-            self.direction = 3
+            self.direction = 2
         elif curr_imbalance < -0.25:
-            self.direction = -3
+            self.direction = -2
         else:
             self.direction = 0
         # update imbalance
@@ -117,12 +118,14 @@ class CrossStrategy(Strategy):
         # orders.append(Order(self.name, int(avg_bid + self.min_req_price_difference + self.direction), bid_volume))
         # #sell order 
         # orders.append(Order(self.name, int(avg_ask - self.min_req_price_difference + self.direction), ask_volume))        
-        
+        self.mm.update_inventory(self.prod_position)
+        bid_quote, ask_quote = self.mm.calculate_quotes(avg_bid,avg_ask)
+            
         if len(order_depth.sell_orders) != 0:
             best_asks = sorted(order_depth.sell_orders.keys())
 
             i = 0
-            while i < self.trade_count and len(best_asks) > i and best_asks[i] - avg_bid <= self.min_req_price_difference + self.direction:
+            while i < self.trade_count and len(best_asks) > i and best_asks[i] - bid_quote <= self.min_req_price_difference + self.direction:
                 if self.prod_position == self.max_pos:
                     break
                 self.buy_product(best_asks, i, order_depth, orders)
@@ -134,7 +137,7 @@ class CrossStrategy(Strategy):
 
             i = 0
             # Check if the lowest bid (buy order) is lower than the above defined fair value
-            while i < self.trade_count and len(best_bids) > i and avg_ask - best_bids[i] <= self.min_req_price_difference + self.direction:
+            while i < self.trade_count and len(best_bids) > i and ask_quote - best_bids[i] <= self.min_req_price_difference - self.direction:
                 if self.prod_position == -self.max_pos:
                     break
                 self.sell_product(best_bids, i, order_depth, orders)
@@ -371,7 +374,42 @@ class TimeBasedStrategy(CrossStrategy):
         else:
             super().trade(trading_state, orders)
 
+class StoikovMarketMaker(Strategy):
+    def __init__(self, name: str, max_pos: int):
+        super().__init__(name, max_pos)
+        self.alpha = 0.5
+        self.beta = 0.05
+        self.target_inventory = 5
+        self.max_inventory = max_pos
+        self.inventory = 0  # Initial inventory
+        self.mid_price = None
+    def trade(self, trading_state: TradingState, orders: list):
+        order_depth: OrderDepth = trading_state.order_depths[self.name]
+        # Check if there are any SELL orders
 
+        
+    def calculate_mid_price(self, trading_state: TradingState) -> float:
+
+        # if self.mid_price is None:
+        #     default_price = DEFAULT_PRICES[self.name]
+
+        market_bids = trading_state.order_depths[self.name].buy_orders
+        # if len(market_bids) == 0:
+        #     # There are no bid orders in the market (midprice undefined)
+        #     return default_price
+
+        market_asks = trading_state.order_depths[self.name].sell_orders
+        # if len(market_asks) == 0:
+        #     # There are no bid orders in the market (mid_price undefined)
+        #     return default_price
+
+        best_bid = max(market_bids)
+        best_ask = min(market_asks)
+        self.mid_price =  (best_bid + best_ask)/2
+    
+##############################################################################################
+### Apply strategy to products
+##############################################################################################
 class Starfruit(CrossStrategy):
     def __init__(self):
         super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20)
@@ -380,6 +418,9 @@ class Amethysts(FixedStrategy2):
     def __init__(self):
         super().__init__("AMETHYSTS", max_pos=20)
 
+##############################################################################################
+### Trader Class
+##############################################################################################
 class Trader:
 
     def __init__(self) -> None:
@@ -523,3 +564,47 @@ class Logger:
             return value
 
         return value[:max_length - 3] + "..."
+    
+##############################################################################################
+### StoikovMarketMaker: set prices based on the inventory
+##############################################################################################
+    
+class StoikovMarketMaker:
+    def __init__(self, alpha, beta, target_inventory, max_inventory):
+        """
+        Initialize the market maker parameters.
+        :param alpha: Sensitivity of quote prices to inventory level.
+        :param beta: Base spread factor.
+        :param target_inventory: Desired inventory level.
+        :param max_inventory: Maximum allowable inventory.
+        """
+        self.alpha = alpha
+        self.beta = beta
+        self.target_inventory = target_inventory
+        self.max_inventory = max_inventory
+        self.inventory = 0  # Initial inventory
+
+    def update_inventory(self, inv):
+        """
+        Update the market maker's inventory based on the trade history.
+        :param trades: List of executed trades (positive for buys, negative for sells).
+        """
+        self.inventory = inv
+        # Ensure inventory stays within bounds
+        self.inventory = max(min(self.inventory, self.max_inventory), -self.max_inventory)
+
+    def calculate_quotes(self, best_bid, best_ask):
+        """
+        Calculate the bid and ask prices based on the current midpoint price and inventory level.
+        :param midpoint: Current midpoint price.
+        :return: Tuple of (bid_price, ask_price).
+        """
+        midpoint = (best_bid + best_ask) / 2
+        inventory_factor = self.alpha * (self.inventory - self.target_inventory) / self.max_inventory
+        spread = self.beta * (1 + abs(inventory_factor))
+        bid_price = midpoint - spread / 2
+        ask_price = midpoint + spread / 2
+        return round(bid_price), round(ask_price)
+    
+    
+    
