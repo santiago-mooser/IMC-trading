@@ -89,6 +89,8 @@ class CrossStrategy(Strategy):
         # try the imbalance indicator: (total_bid_vol - total_ask_vol)/ (total_bid_vol + total_ask_vol), pos if bid vol is higher
         self.imbalance = 0
         self.direction = 0
+        
+        # Stoikov Model
         self.mm = StoikovMarketMaker(0.2, 5.4, 0, 20)
         
     def trade(self, trading_state: TradingState, orders: list):
@@ -98,6 +100,8 @@ class CrossStrategy(Strategy):
             return
         
         avg_bid, avg_ask = self.calculate_prices(self.strategy_start_day)
+        
+        # imbalance is not useful, stop using it
         curr_imbalance =  0 # self.calculate_imbalance(self.strategy_start_day)
         if curr_imbalance > self.imbalance:
             # we may track the changes of the imbalance 
@@ -109,6 +113,7 @@ class CrossStrategy(Strategy):
             self.direction = -1
         else:
             self.direction = 0
+            
         # update imbalance
         self.imbalance = curr_imbalance
         
@@ -117,7 +122,8 @@ class CrossStrategy(Strategy):
         #buy order 
         # orders.append(Order(self.name, int(avg_bid + self.min_req_price_difference + self.direction), bid_volume))
         # #sell order 
-        # orders.append(Order(self.name, int(avg_ask - self.min_req_price_difference + self.direction), ask_volume))        
+        # orders.append(Order(self.name, int(avg_ask - self.min_req_price_difference + self.direction), ask_volume))    
+            
         self.mm.update_inventory(self.prod_position)
         bid_quote, ask_quote = self.mm.calculate_quotes(avg_bid,avg_ask)
             
