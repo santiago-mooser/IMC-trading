@@ -85,28 +85,28 @@ class CrossStrategy(Strategy):
         self.old_asks = []
         self.old_bids = []
         self.min_req_price_difference = min_req_price_difference
-        
+
         # try the imbalance indicator: (total_bid_vol - total_ask_vol)/ (total_bid_vol + total_ask_vol), pos if bid vol is higher
         self.imbalance = 0
         self.direction = 0
-        
+
         # Stoikov Model
         self.mm = StoikovMarketMaker(0.2, 5.4, 0, 20)
-        
+
     def trade(self, trading_state: TradingState, orders: list):
         order_depth: OrderDepth = trading_state.order_depths[self.name]
         self.cache_prices(order_depth)
         if len(self.old_asks) < self.strategy_start_day or len(self.old_bids) < self.strategy_start_day:
             return
-        
+
         avg_bid, avg_ask = self.calculate_prices(self.strategy_start_day)
-        
+
         # imbalance is not useful, stop using it
         curr_imbalance =  0 # self.calculate_imbalance(self.strategy_start_day)
         if curr_imbalance > self.imbalance:
-            # we may track the changes of the imbalance 
+            # we may track the changes of the imbalance
             pass
-  
+
         if curr_imbalance > 0.5:
             self.direction = 1
         elif curr_imbalance < -0.5:
@@ -114,20 +114,18 @@ class CrossStrategy(Strategy):
         else:
             self.direction = 0
 
-            
         # update imbalance
         self.imbalance = curr_imbalance
-        
-        bid_volume = self.max_pos - self.prod_position 
-        ask_volume = -self.max_pos - self.prod_position 
-        #buy order 
+
+        bid_volume = self.max_pos - self.prod_position
+        ask_volume = -self.max_pos - self.prod_position
+        #buy order
         # orders.append(Order(self.name, int(avg_bid + self.min_req_price_difference + self.direction), bid_volume))
-        # #sell order 
-        # orders.append(Order(self.name, int(avg_ask - self.min_req_price_difference + self.direction), ask_volume))    
-            
+        # #sell order
+        # orders.append(Order(self.name, int(avg_ask - self.min_req_price_difference + self.direction), ask_volume))
+
         self.mm.update_inventory(self.prod_position)
         bid_quote, ask_quote = self.mm.calculate_quotes(avg_bid,avg_ask)
-            
 
         if len(order_depth.sell_orders) != 0:
             best_asks = sorted(order_depth.sell_orders.keys())
@@ -289,12 +287,13 @@ class FixedStrategy2(Strategy):
     def trade(self, trading_state: TradingState, orders: list):
         order_depth: OrderDepth = trading_state.order_depths[self.name]
         # Check if there are any SELL orders
+        bid_volume = self.max_pos - self.prod_position
+        ask_volume = -self.max_pos - self.prod_position
 
-        bid_volume = self.max_pos - self.prod_position 
-        ask_volume = -self.max_pos - self.prod_position 
-        
         orders.append(Order(self.name, self.amethysts_price - 1, bid_volume))
         orders.append(Order(self.name, self.amethysts_price + 1, ask_volume))
+
+
 
 class ObservationStrategy(Strategy):
     def __init__(self, name: str, max_position: int):
@@ -418,15 +417,13 @@ class StoikovMarketMaker(Strategy):
         self.mid_price =  (best_bid + best_ask)/2
 
 
-    
 ##############################################################################################
 ### RegressionStrategy, using regression to find the best fair price
 ##############################################################################################
-    
+
 class RegressionStrategy(Strategy):
     def __init__(self, name: str, min_req_price_difference: int, max_position: int):
         super().__init__(name, max_position)
-        
 
         self.prices = []
         self.imbalances = []
@@ -447,32 +444,28 @@ class RegressionStrategy(Strategy):
         self.old_asks = []
         self.old_bids = []
 
-        
         self.min_req_price_difference = min_req_price_difference
         self.intercept = 1.2389442725070694
         self.coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
-        self.mm = StoikovMarketMaker(0.23348603634235995, 1.966874725882954, 0, 20)
+        self.mm = StoikovMarketMaker(0.5, 1, 0, 20)
 
     def trade(self, trading_state: TradingState, orders: list):
         order_depth: OrderDepth = trading_state.order_depths[self.name]
-        
+
         self.cache_features(trading_state)
-        
+
         if len(self.prices) < self.strategy_start_day:
             return
-        
 
         if len(self.prices) == self.strategy_start_day:
             fair_price = self.calculate_fair_price()
             avg_bid, avg_ask = fair_price - 2, fair_price + 2
         else:
             avg_bid, avg_ask =  self.calculate_prices(self.strategy_start_day)
+        # self.mm.update_inventory(self.prod_position)
+        # avg_bid, avg_ask = self.mm.calculate_quotes(avg_bid,avg_ask)
+        orders.extend(self.compute_orders_regression(order_depth, avg_bid, avg_ask))
 
-        self.mm.update_inventory(self.prod_position)
-        avg_bid, avg_ask = self.mm.calculate_quotes(avg_bid,avg_ask)       
-        orders.extend(self.compute_orders_regression(order_depth, avg_bid, avg_ask))  
-
-        
 
         # if len(order_depth.sell_orders) != 0:
         #     best_asks = sorted(order_depth.sell_orders.keys())
@@ -500,53 +493,50 @@ class RegressionStrategy(Strategy):
 
 
     def cache_features(self, trading_state):
-
-        """ 
+        """
         update features for the regression
         """
         order_depth: OrderDepth = trading_state.order_depths[self.name]
-        
+
         sell_orders = order_depth.sell_orders
         buy_orders = order_depth.buy_orders
-        
 
         if len(self.old_asks) == self.strategy_start_day:
             self.old_asks.pop(0)
         if len(self.old_bids) == self.strategy_start_day:
             self.old_bids.pop(0)
-            
+
         self.old_asks.append(sell_orders)
         self.old_bids.append(buy_orders)
-        
+
         # mid_prices t-3 to t
         if len(self.prices) == self.strategy_start_day:
             self.prices.pop(0)
-        
-        mid_price = self.calculate_mid_price(order_depth)            
+
+        mid_price = self.calculate_mid_price(order_depth)
         self.prices.append(mid_price)
-        
+
 
         # order imbalance t-1 to t
         if len(self.imbalances) == 2:
             self.imbalances.pop(0)
 
-        imbalance = self.calculate_imbalance(order_depth)            
-
+        imbalance = self.calculate_imbalance(order_depth)
         self.imbalances.append(imbalance)
 
         # order spreads t-1 to t
         if len(self.spreads) == 2:
             self.spreads.pop(0)
 
-        spread = self.calculate_spread(order_depth)            
+        spread = self.calculate_spread(order_depth)
         self.spreads.append(spread)
+
 
         # order vwaps t-1 to t
         if len(self.vwaps) == 2:
             self.vwaps.pop(0)
 
-        vwap = self.calculate_vwap(trading_state)            
-
+        vwap = self.calculate_vwap(trading_state)
         self.vwaps.append(vwap)
 
 
@@ -631,10 +621,7 @@ class RegressionStrategy(Strategy):
         if bid_vol + ask_vol == 0:
             return 0
         imbalance = (bid_vol + ask_vol)/ (bid_vol - ask_vol)
-
-        return imbalance     
-     
-
+        return imbalance
 
     def calculate_mid_price(self, order_depth: OrderDepth) -> float:
 
@@ -671,7 +658,7 @@ class RegressionStrategy(Strategy):
                 return self.calculate_mid_price(state.order_depths[self.name])
             else:
                 return self.vwaps[-1]
- 
+
         market_trades = state.market_trades[self.name]
 
         for trade in market_trades:
@@ -723,7 +710,6 @@ class RegressionStrategy(Strategy):
             cpos += num
 
         cpos = self.prod_position
-        
 
         for bid, vol in obuy.items():
             if ((bid >= acc_ask) or ((self.prod_position>0) and (bid+1 == acc_ask))) and cpos > -self.max_pos:
@@ -738,8 +724,7 @@ class RegressionStrategy(Strategy):
             orders.append(Order(self.name, sell_pr, num))
             cpos += num
 
-        return orders    
-    
+        return orders
 
 ##############################################################################################
 ### Apply strategy to products
@@ -780,6 +765,8 @@ class Trader:
                 self.products[product].reset_from_state(state)
                 self.products[product].trade(trading_state=state, orders=orders)
                 result[product] = orders
+
+
 
         traderData = ""
 
@@ -936,5 +923,4 @@ class StoikovMarketMaker:
         spread = self.beta * (1 + abs(inventory_factor))
         bid_price = midpoint - spread / 2
         ask_price = midpoint + spread / 2
-
         return round(bid_price), round(ask_price)
