@@ -11,6 +11,8 @@ plotly = "*"
 seaborn = "*"
 ipykernel = "*"
 scikit-learn="*"
+prosperity2bt="*"
+prosperity2submit="*"
 
 [dev-packages]
 
