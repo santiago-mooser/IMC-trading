@@ -10,6 +10,7 @@ dash = "*"
 plotly = "*"
 seaborn = "*"
 ipykernel = "*"
+scikit-learn="*"
 
 [dev-packages]
 
