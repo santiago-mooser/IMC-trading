@@ -474,6 +474,112 @@ class TimeBasedStrategy(CrossStrategy):
         else:
             super().trade(trading_state, orders)
 
+class arbitrageStrategy(Strategy):
+    def __init__(self, name, min_req_price_difference, max_position):
+        super().__init__(name, min_req_price_difference, max_position)
+
+        self.min_price_diff = 1
+
+    def trade(self, trading_state: TradingState, orders: list):
+        order_depth = trading_state.order_depths[self.name]
+
+        # first we find out the underlying value of the securities
+        underlying_value = self.calculate_basket_underlying_price(trading_state)
+
+        # Then we compare against the predicted fair value of the basket (can use ema10 or linear regression)
+        fair_value_of_basket = self.calculate_basket_fair_market_price(trading_state)
+
+        # then if the price of the securities is lower, we sell the basket. Also, if we have a short position of baskets already, buy the underlying securities and convert them  to the basket
+        tot_basket_sell_volume = 0
+        if fair_value_of_basket - underlying_value > self.min_price_diff:
+            # Fill the bids
+            for i, bid in enumerate(order_depth.buy_orders):
+                if bid <= fair_value_of_basket:
+                    sell_volume = order_depth.buy_orders[bid]
+                    tot_basket_sell_volume += sell_volume
+                    if tot_basket_sell_volume >= self.max_pos:
+                        sell_volume = tot_basket_sell_volume - self.max_pos
+                    orders.append(Order(self.name, bid, -sell_volume))
+
+
+        # If the price of the securities is lower, then we buy the basket. Also, if we have a large long position of baskets already, convert the basket to the underlying securities and sell them
+        tot_basket_buy_volume = 0
+        if fair_value_of_basket - underlying_value < -self.min_price_diff:
+            # fill the asks under the fair vavlue
+            for i, ask in enumerate(order_depth.sell_orders):
+                buy_volume = order_depth.sell_orders[ask]
+                tot_basket_buy_volume += buy_volume
+                if tot_basket_buy_volume > self.max_pos:
+                    buy_volume = tot_basket_buy_volume - self.max_pos
+                orders.append(Order(self.name, ask, buy_volume))
+
+    def calculate_basket_underlying_price(self, trading_state: TradingState):
+        '''
+        Calculate the real underlying price of the basket by calculating the value of the underlying assets:
+        4 chocolates, 6 strawberries & 1 rose
+        '''
+
+        strawberry_fair_price = self.calculate_strawberry_fair_market_price(trading_state)
+        chocolate_fair_price = self.calculate_chocolate_fair_market_price(trading_state)
+        roses_fair_price = self.calculate_rose_fair_market_price(trading_state)
+
+        return 4 * chocolate_fair_price + 6 * strawberry_fair_price + roses_fair_price
+
+    def calculate_strawberry_fair_market_price(self, trading_state: TradingState) -> float:
+        '''
+        This is where we will do the linear regression for strawberries.
+        For now, it just returns the midpoint
+        '''
+        order_depth = trading_state.order_depths[self.name]
+        midpoint = self.calculate_mid_price(order_depth)
+
+        return midpoint
+
+    def calculate_chocolate_fair_market_price(self, trading_state: TradingState) -> float:
+        '''
+        This is where we will do the linear regression for chocolates.
+        For now, it just returns the midpoint
+        '''
+        order_depth = trading_state.order_depths[self.name]
+        midpoint = self.calculate_mid_price(order_depth)
+
+        return midpoint
+
+    def calculate_rose_fair_market_price(self, trading_state: TradingState) -> float:
+        '''
+        This is where we will do the linear regression for roses.
+        For now, it just returns the midpoint
+        '''
+        order_depth = trading_state.order_depths[self.name]
+        midpoint = self.calculate_mid_price(order_depth)
+
+        return midpoint
+
+    def calculate_basket_fair_market_price(self, trading_state: TradingState):
+        '''
+        This is where we will do the linear regression for the baskets.
+        For now, it just returns the midpoint
+        '''
+
+        order_depth = trading_state.order_depths[self.name]
+
+        midprice = self.calculate_mid_price(order_depth)
+
+        return midprice
+
+    def calculate_mid_price(self, order_depth: OrderDepth) -> float:
+
+        market_bids = order_depth.buy_orders
+
+        market_asks = order_depth.sell_orders
+
+        best_bid = max(market_bids)
+        best_ask = min(market_asks)
+
+        return  (best_bid + best_ask)/2
+
+
+
 ##############################################################################################
 ### RegressionStrategy, using regression to find the best fair price
 ##############################################################################################
@@ -798,6 +904,10 @@ class Orchids(ObservationStrategy):
     def __init__(self):
         super().__init__("ORCHIDS", max_position=20)
 
+class Baskets(arbitrageStrategy):
+    def __init__(self):
+        super().__init__("BASKETS", min_req_price_difference=3, max_position=20)
+
 ##############################################################################################
 ### Trader Class
 ##############################################################################################
@@ -807,7 +917,8 @@ class Trader:
         self.products = {
             "STARFRUIT": Starfruit(),
             "AMETHYSTS": Amethysts(),
-            "ORCHIDS": Orchids()
+            "ORCHIDS": Orchids(),
+            "BASKETS": Baskets()
         }
         self.logger = Logger()
 
@@ -826,9 +937,15 @@ class Trader:
 
                 self.products[product].reset_from_state(state)
                 self.products[product].trade(trading_state=state, orders=orders)
+
+
+                # !!!!!!!!!! #
+                # Need to change this
+                # since strategy now returns
+                # more than one trade
+                # !!!!!!!!!! #
                 result[product] = orders
-
-
+                # !!!!!!!!!! #
 
         traderData = ""
 
