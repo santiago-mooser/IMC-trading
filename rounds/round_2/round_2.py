@@ -85,48 +85,48 @@ class CrossStrategy(Strategy):
         self.old_asks = []
         self.old_bids = []
         self.min_req_price_difference = min_req_price_difference
-        
+
         # try the imbalance indicator: (total_bid_vol - total_ask_vol)/ (total_bid_vol + total_ask_vol), pos if bid vol is higher
         self.imbalance = 0
         self.direction = 0
-        
+
         # Stoikov Model
         self.mm = StoikovMarketMaker(0.2, 5.4, 0, 20)
-        
+
     def trade(self, trading_state: TradingState, orders: list):
         order_depth: OrderDepth = trading_state.order_depths[self.name]
         self.cache_prices(order_depth)
         if len(self.old_asks) < self.strategy_start_day or len(self.old_bids) < self.strategy_start_day:
             return
-        
+
         avg_bid, avg_ask = self.calculate_prices(self.strategy_start_day)
-        
+
         # imbalance is not useful, stop using it
         curr_imbalance =  0 # self.calculate_imbalance(self.strategy_start_day)
         if curr_imbalance > self.imbalance:
-            # we may track the changes of the imbalance 
+            # we may track the changes of the imbalance
             pass
-        
+
         if curr_imbalance > 0.5:
             self.direction = 1
         elif curr_imbalance < -0.5:
             self.direction = -1
         else:
             self.direction = 0
-            
+
         # update imbalance
         self.imbalance = curr_imbalance
-        
-        bid_volume = self.max_pos - self.prod_position 
-        ask_volume = -self.max_pos - self.prod_position 
-        #buy order 
+
+        bid_volume = self.max_pos - self.prod_position
+        ask_volume = -self.max_pos - self.prod_position
+        #buy order
         # orders.append(Order(self.name, int(avg_bid + self.min_req_price_difference + self.direction), bid_volume))
-        # #sell order 
-        # orders.append(Order(self.name, int(avg_ask - self.min_req_price_difference + self.direction), ask_volume))    
-            
+        # #sell order
+        # orders.append(Order(self.name, int(avg_ask - self.min_req_price_difference + self.direction), ask_volume))
+
         self.mm.update_inventory(self.prod_position)
         bid_quote, ask_quote = self.mm.calculate_quotes(avg_bid,avg_ask)
-            
+
         if len(order_depth.sell_orders) != 0:
             best_asks = sorted(order_depth.sell_orders.keys())
 
@@ -164,7 +164,7 @@ class CrossStrategy(Strategy):
         avg_ask = np.average([x[0] for x in relevant_asks], weights=[x[1] for x in relevant_asks])
 
         return avg_bid, avg_ask
-    
+
     def calculate_imbalance(self, days: int) -> float:
         # Calculate the imbalance for the last days
 
@@ -278,7 +278,7 @@ class FixedStrategy(Strategy):
                     break
                 self.sell_product(best_bids, i, order_depth, orders)
                 i += 1
-                
+
 class FixedStrategy2(Strategy):
     def __init__(self, name: str, max_pos: int):
         super().__init__(name, max_pos)
@@ -287,25 +287,20 @@ class FixedStrategy2(Strategy):
     def trade(self, trading_state: TradingState, orders: list):
         order_depth: OrderDepth = trading_state.order_depths[self.name]
         # Check if there are any SELL orders
-        bid_volume = self.max_pos - self.prod_position 
-        ask_volume = -self.max_pos - self.prod_position 
-        
+        bid_volume = self.max_pos - self.prod_position
+        ask_volume = -self.max_pos - self.prod_position
+
         orders.append(Order(self.name, self.amethysts_price - 1, bid_volume))
         orders.append(Order(self.name, self.amethysts_price + 1, ask_volume))
 
 class ObservationStrategy(Strategy):
     def __init__(self, name: str, max_position: int):
         super().__init__(name, max_position)
-        self.old_dolphins = -1
-        self.dolphins_gone = False
-
-        self.dolphin_action_time = 900
+        self.cost = 0
         self.gear_timestamp_diff = 70000
 
-        self.humidity_out_timestamp = -1
-        
-        self.dolphins_gone_timestamp = -1
-        
+        self.max_pos = max_position
+
         self.bidPrice = None
         self.askPrice = None
         self.transportFees = None
@@ -313,14 +308,16 @@ class ObservationStrategy(Strategy):
         self.importTariff = None
         self.sunlight = None
         self.humidity = None
-        
+
+        self.sunlight_average = 2100
+        self.ema_param = 0.5
+
         self.humidity_out = None
         self.sunlight_out = None
-        
-        self.check = False
+
     def handle_observations(self, trading_state: TradingState):
         obs = trading_state.observations.conversionObservations[self.name]
-        
+
         self.bidPrice = obs.bidPrice
         self.askPrice = obs.askPrice
         self.transportFees = obs.transportFees
@@ -328,9 +325,10 @@ class ObservationStrategy(Strategy):
         self.importTariff = obs.importTariff
         self.sunlight = obs.sunlight
         self.humidity = obs.humidity
-        
+        self.humidity_effect_on_production = 0
+
         self.humidity_out_timestamp = trading_state.timestamp
-        
+
         if self.humidity > 80 or self.humidity < 60:
             self.humidity_out = True
         else:
@@ -340,37 +338,113 @@ class ObservationStrategy(Strategy):
             self.sunlight_out = True
         else:
             self.sunlight_out = False
-            
+
+        if self.humidity < 60 or self.humidity > 80:
+            self.humidity_out = True
+
+        if self.humidity > 80:
+            self.humidity_effect_on_production = int((80 - self.humidity) /5)
+        elif self.humidity < 60:
+            self.humidity_effect_on_production = int((self.humidity - 80) /5)
+
+        # calculate ema of sunlight
+        if self.sunlight_average == 0:
+            self.sunlight_average = self.sunlight
+        self.sunlight = self.sunlight * self.ema_param + self.sunlight_average * (1 - self.ema_param)
+
+
     def trade(self, trading_state: TradingState, orders: list):
 
-        self.handle_observations(trading_state)
+        order_list =[]
 
+        self.handle_observations(trading_state)
+        self.update_cost(trading_state)
         order_depth: OrderDepth = trading_state.order_depths[self.name]
-        
+
         if self.askPrice == self.bidPrice:
             return
-        if self.humidity_out:
-            # start buying if humidity is out of the range?
-            
-            # self.continuous_buy(order_depth, orders)
-            # self.buy_product(best_asks, i, order_depth, orders)
-            orders.append(Order(self.name, round(self.askPrice) + 10 , 1))
-            
-        if self.sunlight_out:
-            # product decrease, start selling?
-            # self.continuous_buy(order_depth, orders)            
-            orders.append(Order(self.name, round(self.askPrice) + 10, 1))
+        remote_bid = round(self.bidPrice)
+        remote_ask = round(self.askPrice)
 
-        if not self.sunlight_out and not self.humidity_out:
-            orders.append(Order(self.name,  round(self.bidPrice) - 10, self.prod_position))
-            # self.continuous_sell(order_depth, orders)  
+        # Using the remote bid and remote ask, we can arbitrage between the two markets without having to exhange between the two
 
-    def conversion(self, trading_state) -> int:
+        # If any local bid is higher than remote market, sell in local
+        for i, local_bid in enumerate(order_depth.buy_orders):
+            if local_bid >= remote_bid:
+                order_list.append(Order(self.name, local_bid, -order_depth.buy_orders[local_bid]))
+
+        # If the local ask is lower than the remote market, buy in local
+        for i, local_ask in enumerate(order_depth.sell_orders):
+            if local_ask <= remote_ask:
+                order_list.append(Order(self.name, local_ask, order_depth.sell_orders[local_ask]))
+
+
+
+        orders.extend(order_list)
+
+    def conversion(self, trading_state, position) -> int:
         '''
         get the number of conversion for this round
         '''
-        self.prod_position            
-        
+
+        remote_bid = round(self.bidPrice - self.importTariff - self.transportFees)
+        remote_ask = round(self.askPrice + self.exportTariff + self.transportFees)
+
+        order_depth = trading_state.order_depths[self.name]
+
+        buy_sell=0
+
+        # conversions only allow us to sell in remote
+
+        # if the local bid is lower than the remote market, buy in remote
+        for i, local_bid in enumerate(order_depth.buy_orders):
+            if local_bid >= remote_bid:
+                buy_sell -= order_depth.buy_orders[local_bid]
+
+        # If the local ask is higher than the remote market, sell in remote
+        for i, local_ask in enumerate(order_depth.sell_orders):
+            if local_ask <= remote_ask:
+                buy_sell += order_depth.sell_orders[local_ask]
+
+
+        # if any remote ask is lower than local bid, sell in remote
+        for i, local_bid in enumerate(order_depth.buy_orders):
+            if local_bid >= remote_bid:
+                buy_sell += order_depth.buy_orders[local_bid]
+
+        # if any remote bid is higher than local ask, buy in remote
+        for i, local_ask in enumerate(order_depth.sell_orders):
+            if local_ask <= remote_ask:
+                buy_sell -= order_depth.sell_orders[local_ask]
+
+        #  if there is remote ask that is higher than local ask, sell in remote
+        for i, local_ask in enumerate(order_depth.sell_orders):
+            if local_ask <= remote_ask:
+                buy_sell += order_depth.sell_orders[local_ask]
+
+        # finally, if there is remote bid that is lower than local bid, buy in remote
+        for i, local_bid in enumerate(order_depth.buy_orders):
+            if local_bid >= remote_bid:
+                buy_sell -= order_depth.buy_orders[local_bid]
+
+        return buy_sell
+
+
+
+    def update_cost(self, trading_state: TradingState):
+        '''
+        update the cost of the current
+        '''
+        if self.name not in trading_state.market_trades:
+            return
+
+        market_trades = trading_state.market_trades[self.name]
+        for trade in market_trades:
+            if trade.buyer == "SUBMISSION":
+                self.cost += trade.price * trade.quantity + 0.1 * trade.quantity
+            else:
+                self.cost -= trade.price * trade.quantity
+
 class TimeBasedStrategy(CrossStrategy):
     def __init__(self, name, min_req_price_difference, max_position):
         super().__init__(name, min_req_price_difference, max_position)
@@ -403,17 +477,17 @@ class TimeBasedStrategy(CrossStrategy):
 ##############################################################################################
 ### RegressionStrategy, using regression to find the best fair price
 ##############################################################################################
-    
+
 class RegressionStrategy(Strategy):
     def __init__(self, name: str, min_req_price_difference: int, max_position: int):
         super().__init__(name, max_position)
-        
+
         self.prices = []
         self.imbalances = []
         self.vwaps = []
         self.midprice_ema10 = []
         self.spreads = []
-                        
+
         self.strategy_start_day = 4
 
         # New params
@@ -426,7 +500,7 @@ class RegressionStrategy(Strategy):
 
         self.old_asks = []
         self.old_bids = []
-        
+
         self.min_req_price_difference = min_req_price_difference
         self.intercept = 1.2389442725070694
         self.coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
@@ -434,22 +508,22 @@ class RegressionStrategy(Strategy):
 
     def trade(self, trading_state: TradingState, orders: list):
         order_depth: OrderDepth = trading_state.order_depths[self.name]
-        
+
         self.cache_features(trading_state)
-        
+
         if len(self.prices) < self.strategy_start_day:
             return
-        
+
         if len(self.prices) == self.strategy_start_day:
             fair_price = self.calculate_fair_price()
             avg_bid, avg_ask = fair_price - 2, fair_price + 2
         else:
             avg_bid, avg_ask =  self.calculate_prices(self.strategy_start_day)
         # self.mm.update_inventory(self.prod_position)
-        # avg_bid, avg_ask = self.mm.calculate_quotes(avg_bid,avg_ask)       
-        orders.extend(self.compute_orders_regression(order_depth, avg_bid, avg_ask))  
+        # avg_bid, avg_ask = self.mm.calculate_quotes(avg_bid,avg_ask)
+        orders.extend(self.compute_orders_regression(order_depth, avg_bid, avg_ask))
 
-        
+
         # if len(order_depth.sell_orders) != 0:
         #     best_asks = sorted(order_depth.sell_orders.keys())
 
@@ -476,50 +550,50 @@ class RegressionStrategy(Strategy):
 
 
     def cache_features(self, trading_state):
-        """ 
+        """
         update features for the regression
         """
         order_depth: OrderDepth = trading_state.order_depths[self.name]
-        
+
         sell_orders = order_depth.sell_orders
         buy_orders = order_depth.buy_orders
-        
+
         if len(self.old_asks) == self.strategy_start_day:
             self.old_asks.pop(0)
         if len(self.old_bids) == self.strategy_start_day:
             self.old_bids.pop(0)
-            
+
         self.old_asks.append(sell_orders)
         self.old_bids.append(buy_orders)
-        
+
         # mid_prices t-3 to t
         if len(self.prices) == self.strategy_start_day:
             self.prices.pop(0)
-        
-        mid_price = self.calculate_mid_price(order_depth)            
+
+        mid_price = self.calculate_mid_price(order_depth)
         self.prices.append(mid_price)
-        
+
 
         # order imbalance t-1 to t
         if len(self.imbalances) == 2:
             self.imbalances.pop(0)
-        
-        imbalance = self.calculate_imbalance(order_depth)            
+
+        imbalance = self.calculate_imbalance(order_depth)
         self.imbalances.append(imbalance)
 
         # order spreads t-1 to t
         if len(self.spreads) == 2:
             self.spreads.pop(0)
-        
-        spread = self.calculate_spread(order_depth)            
+
+        spread = self.calculate_spread(order_depth)
         self.spreads.append(spread)
-        
+
 
         # order vwaps t-1 to t
         if len(self.vwaps) == 2:
             self.vwaps.pop(0)
-        
-        vwap = self.calculate_vwap(trading_state)            
+
+        vwap = self.calculate_vwap(trading_state)
         self.vwaps.append(vwap)
 
 
@@ -595,7 +669,7 @@ class RegressionStrategy(Strategy):
         max_bid = max(order_depth.buy_orders, key=order_depth.buy_orders.get)
         max_ask = max(order_depth.sell_orders, key=order_depth.sell_orders.get)
         return (max_bid + max_ask) / 2
-    
+
     def calculate_imbalance(self, order_depth: OrderDepth) -> float:
         # Calculate the imbalance for the last days
 
@@ -604,14 +678,14 @@ class RegressionStrategy(Strategy):
         if bid_vol + ask_vol == 0:
             return 0
         imbalance = (bid_vol + ask_vol)/ (bid_vol - ask_vol)
-        return imbalance     
-     
+        return imbalance
+
     def calculate_mid_price(self, order_depth: OrderDepth) -> float:
 
         market_bids = order_depth.buy_orders
 
         market_asks = order_depth.sell_orders
-        
+
         best_bid = max(market_bids)
         best_ask = min(market_asks)
         return  (best_bid + best_ask)/2
@@ -621,7 +695,7 @@ class RegressionStrategy(Strategy):
         market_bids = order_depth.buy_orders
 
         market_asks = order_depth.sell_orders
-        
+
         best_bid = max(market_bids)
         best_ask = min(market_asks)
         return  best_ask - best_bid
@@ -631,19 +705,19 @@ class RegressionStrategy(Strategy):
         Volume-Weighted Average Price
         calculate from all the trades happened from last iteration
         """
-        
+
         total_value = 0
         total_volume = 0
-        
+
         # when there is not trad in the beginning
         if self.name not in state.market_trades:
             if self.vwaps == []:
                 return self.calculate_mid_price(state.order_depths[self.name])
             else:
                 return self.vwaps[-1]
-                
+
         market_trades = state.market_trades[self.name]
-        
+
         for trade in market_trades:
             total_value += trade.price * trade.quantity
             total_volume += trade.quantity
@@ -654,7 +728,7 @@ class RegressionStrategy(Strategy):
             return vwap
         else:
             return self.vwaps[-1]
-        
+
     def compute_orders_regression(self, order_depth, acc_bid, acc_ask):
         orders: list[Order] = []
 
@@ -691,9 +765,9 @@ class RegressionStrategy(Strategy):
             num = self.max_pos - cpos
             orders.append(Order(self.name, bid_pr, num))
             cpos += num
-        
+
         cpos = self.prod_position
-        
+
         for bid, vol in obuy.items():
             if ((bid >= acc_ask) or ((self.prod_position>0) and (bid+1 == acc_ask))) and cpos > -self.max_pos:
                 order_for = max(-vol, -self.max_pos-cpos)
@@ -707,8 +781,8 @@ class RegressionStrategy(Strategy):
             orders.append(Order(self.name, sell_pr, num))
             cpos += num
 
-        return orders    
-    
+        return orders
+
 ##############################################################################################
 ### Apply strategy to products
 ##############################################################################################
@@ -723,7 +797,7 @@ class Amethysts(FixedStrategy2):
 class Orchids(ObservationStrategy):
     def __init__(self):
         super().__init__("ORCHIDS", max_position=20)
-        
+
 ##############################################################################################
 ### Trader Class
 ##############################################################################################
@@ -731,8 +805,8 @@ class Trader:
 
     def __init__(self) -> None:
         self.products = {
-            # "STARFRUIT": Starfruit(),
-            # "AMETHYSTS": Amethysts(),
+            "STARFRUIT": Starfruit(),
+            "AMETHYSTS": Amethysts(),
             "ORCHIDS": Orchids()
         }
         self.logger = Logger()
@@ -754,16 +828,24 @@ class Trader:
                 self.products[product].trade(trading_state=state, orders=orders)
                 result[product] = orders
 
-        
+
 
         traderData = ""
 
 		# Sample conversion request.
-        conversions = 0
+        orchids_position = state.position.get("ORCHIDS", 0)
+        conversions = self.products["ORCHIDS"].conversion(state, orchids_position)
 
         self.logger.flush(state, result, conversions, traderData)
 
-        return result, 0, ""
+        return result, conversions, ""
+
+    def conversions(self, state: TradingState) -> int:
+        return self.products["ORCHIDS"].conversion(state)
+
+
+    def toJSON(self):
+        return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True)
 
 ############################################
 # This is the logger that we use for the   #
@@ -871,11 +953,11 @@ class Logger:
             return value
 
         return value[:max_length - 3] + "..."
-    
+
 ##############################################################################################
 ### StoikovMarketMaker: set prices based on the inventory
 ##############################################################################################
-    
+
 class StoikovMarketMaker:
     def __init__(self, alpha, beta, target_inventory, max_inventory):
         """
