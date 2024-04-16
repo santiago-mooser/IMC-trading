@@ -585,7 +585,7 @@ class arbitrageStrategy(Strategy):
 ##############################################################################################
 
 class RegressionStrategy(Strategy):
-    def __init__(self, name: str, min_req_price_difference: int, max_position: int):
+    def __init__(self, name: str, min_req_price_difference: int, max_position: int, intercept, coef):
         super().__init__(name, max_position)
 
         self.prices = []
@@ -608,8 +608,8 @@ class RegressionStrategy(Strategy):
         self.old_bids = []
 
         self.min_req_price_difference = min_req_price_difference
-        self.intercept = 1.2389442725070694
-        self.coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
+        self.intercept = intercept
+        self.coef = coef
         self.mm = StoikovMarketMaker(0.23348603634235995, 1.966874725882954, 0, 20)
 
     def trade(self, trading_state: TradingState, orders: list):
@@ -894,7 +894,10 @@ class RegressionStrategy(Strategy):
 ##############################################################################################
 class Starfruit(RegressionStrategy):
     def __init__(self):
-        super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20)
+        super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20, 
+                         intercept = 1.2389442725070694, 
+                         coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
+                         )
 
 class Amethysts(FixedStrategy2):
     def __init__(self):
@@ -907,7 +910,28 @@ class Orchids(ObservationStrategy):
 class Baskets(arbitrageStrategy):
     def __init__(self):
         super().__init__("BASKETS", min_req_price_difference=3, max_position=20)
-
+        
+class Chocolate(RegressionStrategy):
+    def __init__(self):
+        super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250, 
+                         intercept = 0,
+                         coef = [-0.00437733,  0.00308218,  0.01752576,  0.98360442, -0.90183322,
+                                -2.79369535,  0.02711808, -0.00315843,  0.11274011, -0.11258077]
+                        )
+class Roses(RegressionStrategy):
+    def __init__(self):
+        super().__init__("ROSES", min_req_price_difference=3, max_position=60, 
+                         intercept = 0, 
+                         coef = [-0.00981411,  0.00393729,  0.01444269,  0.99055514, -0.0615577 ,
+                                    -0.3335764 ,  0.03956394, -0.04242976, -0.07749774,  0.07836905]
+                         )
+class Strawberries(RegressionStrategy):
+    def __init__(self):
+        super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350, 
+                         intercept = 0, 
+                         coef = [-0.01862957,  0.0360459 ,  0.11510304,  0.86723537, -0.04803083,
+                                -1.15100102, -0.00741988, -0.02239479, -0.00789983,  0.0081571 ]
+                         )
 ##############################################################################################
 ### Trader Class
 ##############################################################################################
@@ -915,10 +939,13 @@ class Trader:
 
     def __init__(self) -> None:
         self.products = {
-            "STARFRUIT": Starfruit(),
-            "AMETHYSTS": Amethysts(),
-            "ORCHIDS": Orchids(),
-            "BASKETS": Baskets()
+            # "STARFRUIT": Starfruit(),
+            # "AMETHYSTS": Amethysts(),
+            # "ORCHIDS": Orchids(),
+            # "BASKETS": Baskets(),
+            "CHOCOLATE": Chocolate(),
+            "ROSES": Roses(),
+            "STRAWBERRIES": Strawberries()
         }
         self.logger = Logger()
 
@@ -951,8 +978,8 @@ class Trader:
 
 		# Sample conversion request.
         orchids_position = state.position.get("ORCHIDS", 0)
-        conversions = self.products["ORCHIDS"].conversion(state, orchids_position)
-
+        # conversions = self.products["ORCHIDS"].conversion(state, orchids_position)
+        conversions = 0
         self.logger.flush(state, result, conversions, traderData)
 
         return result, conversions, ""
