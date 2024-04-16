@@ -474,20 +474,70 @@ class TimeBasedStrategy(CrossStrategy):
         else:
             super().trade(trading_state, orders)
 
-class arbitrageStrategy(Strategy):
+class ArbitrageStrategy(Strategy):
     def __init__(self, name, min_req_price_difference, max_position):
-        super().__init__(name, min_req_price_difference, max_position)
+        super().__init__(name, max_position)
 
-        self.min_price_diff = 1
+        self.min_price_diff = min_req_price_difference
+
+        self.products = ["CHOCOLATE", "STRAWBERRY", "ROSE", "GIFT_BASKET"]
+        self.coeffs = {}
+        self.coeffs["GITF_BASKET"] = [-4.93091977e-03,  2.60248787e-03,  8.98806498e-03,  9.92372840e-01, -8.29595831e-02,  8.40848233e+00, -3.31841259e-02,  2.30186523e-02, -1.88540730e-01,  1.89507642e-01]
+        self.coeffs["CHOCOLATE"] = [-0.00437733,  0.00308218,  0.01752576,  0.98360442, -0.90183322, -2.79369535,  0.02711808, -0.00315843,  0.11274011, -0.11258077]
+        self.coeffs["ROSE"] = [-0.00981411,  0.00393729,  0.01444269,  0.99055514, -0.0615577, -0.3335764,  0.03956394, -0.04242976, -0.07749774,  0.07836905]
+        self.coeffs["STRAWBERRY"] = [-0.01862957,  0.0360459 ,  0.11510304,  0.86723537, -0.04803083, -1.15100102, -0.00741988, -0.02239479, -0.00789983,  0.0081571 ]
+
+        self.fair_market_prices = {}
+        for product in self.products:
+            self.fair_market_prices[product] = 0
+
+        self.midprices = {}
+        for product in self.products:
+            self.midprices[product] = []
+
+        self.estimated_values = {}
+        for product in self.products:
+            self.estimated_values[product] = []
+
+        self.intercepts = {}
+        for product in self.products:
+            self.intercepts[product] = 0
+
+        self.imbalances = {}
+        for product in self.products:
+            self.imbalances[product] = []
+
+        self.vwaps = {}
+        for product in self.products:
+            self.vwaps[product] = []
+
+        self.spreads = {}
+        for product in self.products:
+            self.spreads[product] = []
+
+
 
     def trade(self, trading_state: TradingState, orders: list):
-        order_depth = trading_state.order_depths[self.name]
+
+        # calculate the estimated value of each product, including basket
+        for product in self.products:
+            order_depth = trading_state.order_depths[product]
+            self.midprices[product].append(self.calculate_mid_price(order_depth, product))
+
+            self.imbalances[product].append(self.calculate_imbalance(order_depth, product))
+
+            self.vwaps[product].append(self.calculate_vwap(trading_state, product))
+
+            self.spreads[product] = self.calculate_spread(order_depth)
+
+            self.estimated_values[product].append(self.calculate_fair_market_price(trading_state, product))
 
         # first we find out the underlying value of the securities
         underlying_value = self.calculate_basket_underlying_price(trading_state)
 
-        # Then we compare against the predicted fair value of the basket (can use ema10 or linear regression)
-        fair_value_of_basket = self.calculate_basket_fair_market_price(trading_state)
+        fair_value_of_basket = self.estimated_values["GIFT_BASKET"][-1]
+
+        print( fair_value_of_basket, underlying_value)
 
         # then if the price of the securities is lower, we sell the basket. Also, if we have a short position of baskets already, buy the underlying securities and convert them  to the basket
         tot_basket_sell_volume = 0
@@ -499,8 +549,9 @@ class arbitrageStrategy(Strategy):
                     tot_basket_sell_volume += sell_volume
                     if tot_basket_sell_volume >= self.max_pos:
                         sell_volume = tot_basket_sell_volume - self.max_pos
-                    orders.append(Order(self.name, bid, -sell_volume))
+                    self.buy_product(bid, i, sell_volume, orders)
 
+        self.buy_product(bid, 1, 1, orders)
 
         # If the price of the securities is lower, then we buy the basket. Also, if we have a large long position of baskets already, convert the basket to the underlying securities and sell them
         tot_basket_buy_volume = 0
@@ -513,59 +564,20 @@ class arbitrageStrategy(Strategy):
                     buy_volume = tot_basket_buy_volume - self.max_pos
                 orders.append(Order(self.name, ask, buy_volume))
 
-    def calculate_basket_underlying_price(self, trading_state: TradingState):
-        '''
-        Calculate the real underlying price of the basket by calculating the value of the underlying assets:
-        4 chocolates, 6 strawberries & 1 rose
-        '''
-
-        strawberry_fair_price = self.calculate_strawberry_fair_market_price(trading_state)
-        chocolate_fair_price = self.calculate_chocolate_fair_market_price(trading_state)
-        roses_fair_price = self.calculate_rose_fair_market_price(trading_state)
-
-        return 4 * chocolate_fair_price + 6 * strawberry_fair_price + roses_fair_price
-
-    def calculate_strawberry_fair_market_price(self, trading_state: TradingState) -> float:
-        '''
-        This is where we will do the linear regression for strawberries.
-        For now, it just returns the midpoint
-        '''
-        order_depth = trading_state.order_depths[self.name]
-        midpoint = self.calculate_mid_price(order_depth)
-
-        return midpoint
-
-    def calculate_chocolate_fair_market_price(self, trading_state: TradingState) -> float:
-        '''
-        This is where we will do the linear regression for chocolates.
-        For now, it just returns the midpoint
-        '''
-        order_depth = trading_state.order_depths[self.name]
-        midpoint = self.calculate_mid_price(order_depth)
-
-        return midpoint
-
-    def calculate_rose_fair_market_price(self, trading_state: TradingState) -> float:
-        '''
-        This is where we will do the linear regression for roses.
-        For now, it just returns the midpoint
-        '''
-        order_depth = trading_state.order_depths[self.name]
-        midpoint = self.calculate_mid_price(order_depth)
-
-        return midpoint
-
-    def calculate_basket_fair_market_price(self, trading_state: TradingState):
+    def calculate_fair_market_price(self, product: str):
         '''
         This is where we will do the linear regression for the baskets.
         For now, it just returns the midpoint
         '''
+        intercept = self.intercepts[product]
+        coeff = self.coeffs[product]
 
-        order_depth = trading_state.order_depths[self.name]
+        features = self.midprices[product] + self.imbalances[product] + self.spreads[product] + self.vwaps[product]
 
-        midprice = self.calculate_mid_price(order_depth)
+        # Calculate fair price
+        fair_price = sum(np.multiply(features,coeff)) + intercept
 
-        return midprice
+        return fair_price
 
     def calculate_mid_price(self, order_depth: OrderDepth) -> float:
 
@@ -578,6 +590,69 @@ class arbitrageStrategy(Strategy):
 
         return  (best_bid + best_ask)/2
 
+
+    def calculate_imbalance(self, order_depth: OrderDepth, product: str) -> float:
+        # Calculate the imbalance for the last days
+
+        bid_vol = sum(order_depth.buy_orders.values())
+        ask_vol = sum(order_depth.sell_orders.values())
+        if bid_vol + ask_vol == 0:
+            return 0
+        imbalance = (bid_vol + ask_vol)/ (bid_vol - ask_vol)
+
+        return imbalance
+
+
+    def calculate_vwap(self, state : TradingState, product: str):
+        """
+        Volume-Weighted Average Price
+        calculate from all the trades happened from last iteration
+        """
+
+        total_value = 0
+        total_volume = 0
+
+        # when there is not trad in the beginning
+        if self.name not in state.market_trades[product]:
+            if self.vwaps[product] == []:
+                return self.calculate_mid_price(state.order_depths[product])
+            else:
+                return self.vwaps[product][-1]
+
+        market_trades = state.market_trades[product]
+
+        for trade in market_trades:
+            total_value += trade.price * trade.quantity
+            total_volume += trade.quantity
+
+        # Ensure we don't divide by zero in case of no trades
+        if total_volume != 0:
+            vwap = total_value / total_volume
+            return vwap
+        else:
+            return self.vwaps[product][-1]
+
+    def calculate_spread(self, order_depth: OrderDepth) -> float:
+
+        market_bids = order_depth.buy_orders
+
+        market_asks = order_depth.sell_orders
+
+        best_bid = max(market_bids)
+        best_ask = min(market_asks)
+        return  best_ask - best_bid
+
+    def calculate_basket_underlying_price(self, trading_state: TradingState):
+        '''
+        Calculate the real underlying price of the basket by calculating the value of the underlying assets:
+        4 chocolates, 6 strawberries & 1 rose
+        '''
+
+        strawberry_fair_price = self.estimated_values["STRAWBERRY"][-1]
+        chocolate_fair_price = self.estimated_values["CHOCOLATE"][-1]
+        roses_fair_price = self.estimated_values["ROSE"][-1]
+
+        return 4 * chocolate_fair_price + 6 * strawberry_fair_price + roses_fair_price
 
 
 ##############################################################################################
@@ -894,8 +969,8 @@ class RegressionStrategy(Strategy):
 ##############################################################################################
 class Starfruit(RegressionStrategy):
     def __init__(self):
-        super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20, 
-                         intercept = 1.2389442725070694, 
+        super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20,
+                         intercept = 1.2389442725070694,
                          coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
                          )
 
@@ -907,28 +982,28 @@ class Orchids(ObservationStrategy):
     def __init__(self):
         super().__init__("ORCHIDS", max_position=20)
 
-class Baskets(arbitrageStrategy):
+class Baskets(ArbitrageStrategy):
     def __init__(self):
-        super().__init__("BASKETS", min_req_price_difference=3, max_position=20)
-        
+        super().__init__("BASKETS", min_req_price_difference=1, max_position=20)
+
 class Chocolate(RegressionStrategy):
     def __init__(self):
-        super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250, 
+        super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250,
                          intercept = 0,
                          coef = [-0.00437733,  0.00308218,  0.01752576,  0.98360442, -0.90183322,
                                 -2.79369535,  0.02711808, -0.00315843,  0.11274011, -0.11258077]
                         )
 class Roses(RegressionStrategy):
     def __init__(self):
-        super().__init__("ROSES", min_req_price_difference=3, max_position=60, 
-                         intercept = 0, 
+        super().__init__("ROSES", min_req_price_difference=3, max_position=60,
+                         intercept = 0,
                          coef = [-0.00981411,  0.00393729,  0.01444269,  0.99055514, -0.0615577 ,
                                     -0.3335764 ,  0.03956394, -0.04242976, -0.07749774,  0.07836905]
                          )
 class Strawberries(RegressionStrategy):
     def __init__(self):
-        super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350, 
-                         intercept = 0, 
+        super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350,
+                         intercept = 0,
                          coef = [-0.01862957,  0.0360459 ,  0.11510304,  0.86723537, -0.04803083,
                                 -1.15100102, -0.00741988, -0.02239479, -0.00789983,  0.0081571 ]
                          )
@@ -942,10 +1017,10 @@ class Trader:
             # "STARFRUIT": Starfruit(),
             # "AMETHYSTS": Amethysts(),
             # "ORCHIDS": Orchids(),
-            # "BASKETS": Baskets(),
-            "CHOCOLATE": Chocolate(),
-            "ROSES": Roses(),
-            "STRAWBERRIES": Strawberries()
+            "BASKETS": Baskets(),
+            # "CHOCOLATE": Chocolate(),
+            # "ROSES": Roses(),
+            # "STRAWBERRIES": Strawberries()
         }
         self.logger = Logger()
 
