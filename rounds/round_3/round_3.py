@@ -2,7 +2,7 @@ from datamodel import OrderDepth, TradingState, Order, Symbol, ProsperityEncoder
 from typing import List, Any, Tuple
 import json
 import numpy as np
-
+import collections
 
 class Strategy:
     def __init__(self, name: str, max_position: int):
@@ -1027,27 +1027,36 @@ class Baskets(ArbitrageStrategy):
     def __init__(self):
         super().__init__("GIFT_BASKET", min_req_price_difference=3, max_position=20)
 
-class Chocolate(RegressionStrategy):
+# class Chocolate(RegressionStrategy):
+#     def __init__(self):
+#         super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250,
+#                          intercept = 0,
+#                          coef = [-0.00437733,  0.00308218,  0.01752576,  0.98360442, -0.90183322,
+#                                 -2.79369535,  0.02711808, -0.00315843,  0.11274011, -0.11258077]
+#                         )
+# class Roses(RegressionStrategy):
+#     def __init__(self):
+#         super().__init__("ROSES", min_req_price_difference=3, max_position=60,
+#                          intercept = 0,
+#                          coef = [-0.00981411,  0.00393729,  0.01444269,  0.99055514, -0.0615577 ,
+#                                     -0.3335764 ,  0.03956394, -0.04242976, -0.07749774,  0.07836905]
+#                          )
+# class Strawberries(RegressionStrategy):
+#     def __init__(self):
+#         super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350,
+#                          intercept = 0,
+#                          coef = [-0.01862957,  0.0360459 ,  0.11510304,  0.86723537, -0.04803083,
+#                                 -1.15100102, -0.00741988, -0.02239479, -0.00789983,  0.0081571 ]
+#                         )
+class Chocolate(DiffStrategy):
     def __init__(self):
-        super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250,
-                         intercept = 0,
-                         coef = [-0.00437733,  0.00308218,  0.01752576,  0.98360442, -0.90183322,
-                                -2.79369535,  0.02711808, -0.00315843,  0.11274011, -0.11258077]
-                        )
-class Roses(RegressionStrategy):
+        super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250)
+class Roses(DiffStrategy):
     def __init__(self):
-        super().__init__("ROSES", min_req_price_difference=3, max_position=60,
-                         intercept = 0,
-                         coef = [-0.00981411,  0.00393729,  0.01444269,  0.99055514, -0.0615577 ,
-                                    -0.3335764 ,  0.03956394, -0.04242976, -0.07749774,  0.07836905]
-                         )
-class Strawberries(RegressionStrategy):
+        super().__init__("ROSES", min_req_price_difference=3, max_position=60)
+class Strawberries(DiffStrategy):
     def __init__(self):
-        super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350,
-                         intercept = 0,
-                         coef = [-0.01862957,  0.0360459 ,  0.11510304,  0.86723537, -0.04803083,
-                                -1.15100102, -0.00741988, -0.02239479, -0.00789983,  0.0081571 ]
-                         )
+        super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350,)
 ##############################################################################################
 ### Trader Class
 ##############################################################################################
@@ -1255,3 +1264,92 @@ class StoikovMarketMaker:
         bid_price = midpoint - spread / 2
         ask_price = midpoint + spread / 2
         return round(bid_price), round(ask_price)
+##############################################################################################
+### BASKET STRATEGY
+##############################################################################################
+    
+class BasketStrategy(Strategy):
+    def __init__(self, name: str, max_pos: int):
+        super().__init__(name, max_pos)
+        self.amethysts_price = 10000
+        self.position = {'CHOCOLATE' : 0, 'ROSES' : 0, 'STRAWBERRIES' : 0, 'BASKETS' : 0}
+        self.position_limit = {'CHOCOLATE' : 250, 'ROSES' : 60, 'STRAWBERRIES' : 350, 'BASKETS' : 20}
+        self.orders = {'CHOCOLATE' : [], 'ROSES': [], 'STRAWBERRIES' : [], 'BASKETS' : []}
+        self.prods = ['CHOCOLATE', 'ROSES', 'STRAWBERRIES', 'BASKETS']
+        self.osell = {}
+        self.obuy = {}
+        self.best_sell = {}
+        self.best_buy = {}
+        self.worst_sell = {}
+        self.worst_buy = {}
+        self.mid_price = {}
+        self.vol_buy = {}
+        self.vol_sell = {}
+        self.basket_std = 76 # the std of the diff
+        
+    def trade(self, trading_state: TradingState, orders: list):
+        order_depth: OrderDepth = trading_state.order_depths[self.name]
+        # Check if there are any SELL orders
+        bid_volume = self.max_pos - self.prod_position
+        ask_volume = -self.max_pos - self.prod_position
+
+        orders.append(Order(self.name, self.amethysts_price - 1, bid_volume))
+        orders.append(Order(self.name, self.amethysts_price + 1, ask_volume))
+        for p in self.prods:
+            self.osell[p] = collections.OrderedDict(sorted(order_depth[p].sell_orders.items()))
+            self.obuy[p] = collections.OrderedDict(sorted(order_depth[p].buy_orders.items(), reverse=True))
+
+            self.best_sell[p] = next(iter(self.osell[p]))
+            self.best_buy[p] = next(iter(self.obuy[p]))
+
+            self.worst_sell[p] = next(reversed(self.osell[p]))
+            self.worst_buy[p] = next(reversed(self.obuy[p]))
+
+            self.mid_price[p] = (self.best_sell[p] + self.best_buy[p])/2
+            self.vol_buy[p], self.vol_sell[p] = 0, 0
+            for price, vol in self.obuy[p].items():
+                self.vol_buy[p] += vol 
+                if self.vol_buy[p] >= self.position_limit[p]/10:
+                    break
+            for price, vol in self.osell[p].items():
+                self.vol_sell[p] += -vol 
+                if self.vol_sell[p] >= self.position_limit[p]/10:
+                    break
+        # the residual is the difference minus the mean 
+        res_buy = self.mid_price['GIFT_BASKET'] - self.mid_price['CHOCOLATE']*4 - self.mid_price['STRAWBERRIES']*6 - self.mid_price['ROSES'] - 379.49
+        res_sell = self.mid_price['GIFT_BASKET'] - self.mid_price['CHOCOLATE']*4 - self.mid_price['STRAWBERRIES']*6 - self.mid_price['ROSES'] - 379.49
+        trade_at = self.basket_std*0.5
+        close_at = self.basket_std*(-1000)
+        pb_pos = self.position['GIFT_BASKET']
+        pb_neg = self.position['GIFT_BASKET']        
+        basket_buy_sig = 0
+        basket_sell_sig = 0
+        
+        if self.position['GIFT_BASKET'] == self.POSITION_LIMIT['GIFT_BASKET']:
+            self.cont_buy_basket_unfill = 0
+        if self.position['GIFT_BASKET'] == -self.POSITION_LIMIT['GIFT_BASKET']:
+            self.cont_sell_basket_unfill = 0
+        do_bask = 0
+        
+        if res_sell > trade_at:
+            vol = self.position['GIFT_BASKET'] + self.POSITION_LIMIT['GIFT_BASKET']
+            self.cont_buy_basket_unfill = 0 # no need to buy rn
+            assert(vol >= 0)
+            if vol > 0:
+                do_bask = 1
+                basket_sell_sig = 1
+                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', self.worst_buy['GIFT_BASKET'], -vol)) 
+                self.cont_sell_basket_unfill += 2
+                pb_neg -= vol    
+        elif res_buy < -trade_at:
+            vol = self.POSITION_LIMIT['GIFT_BASKET'] - self.position['GIFT_BASKET']
+            self.cont_sell_basket_unfill = 0 # no need to sell rn
+            assert(vol >= 0)
+            if vol > 0:
+                do_bask = 1
+                basket_buy_sig = 1
+                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', self.worst_sell['GIFT_BASKET'], vol))
+                self.cont_buy_basket_unfill += 2
+                pb_pos += vol    
+    
+        return orders
