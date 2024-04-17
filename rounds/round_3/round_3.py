@@ -2,7 +2,7 @@ from datamodel import OrderDepth, TradingState, Order, Symbol, ProsperityEncoder
 from typing import List, Any, Tuple
 import json
 import numpy as np
-
+import collections
 
 class Strategy:
     def __init__(self, name: str, max_position: int):
@@ -474,20 +474,81 @@ class TimeBasedStrategy(CrossStrategy):
         else:
             super().trade(trading_state, orders)
 
-class arbitrageStrategy(Strategy):
+class ArbitrageStrategy(Strategy):
     def __init__(self, name, min_req_price_difference, max_position):
-        super().__init__(name, min_req_price_difference, max_position)
+        super().__init__(name, max_position)
 
-        self.min_price_diff = 1
+        self.min_price_diff = min_req_price_difference
+
+        self.orders = []
+
+        self.products = ["CHOCOLATE", "STRAWBERRIES", "ROSES", "GIFT_BASKET"]
+        self.coeffs = {}
+        self.coeffs["GIFT_BASKET"] = [9.96390319e-01, 8.48919748e+00, 2.23259588e-02, 1.46613902e-02, 2.19682410e-02, 3.47660363e-03]
+        self.coeffs["CHOCOLATE"] = [-0.00437733,  0.00308218,  0.01752576,  0.98360442, -0.90183322, -2.79369535,  0.02711808, -0.00315843,  0.11274011, -0.11258077]
+        self.coeffs["ROSES"] = [-0.00981411,  0.00393729,  0.01444269,  0.99055514, -0.0615577, -0.3335764,  0.03956394, -0.04242976, -0.07749774,  0.07836905]
+        self.coeffs["STRAWBERRIES"] = [-0.01862957,  0.0360459 ,  0.11510304,  0.86723537, -0.04803083, -1.15100102, -0.00741988, -0.02239479, -0.00789983,  0.0081571 ]
+
+        self.fair_market_prices = {}
+        for product in self.products:
+            self.fair_market_prices[product] = 0
+
+        self.midprices = {}
+        for product in self.products:
+            self.midprices[product] = []
+
+        self.estimated_values = {}
+        for product in self.products:
+            self.estimated_values[product] = []
+
+        self.intercepts = {}
+        for product in self.products:
+            self.intercepts[product] = 0
+
+        self.imbalances = {}
+        for product in self.products:
+            self.imbalances[product] = []
+
+        self.vwaps = {}
+        for product in self.products:
+            self.vwaps[product] = []
+
+        self.spreads = {}
+        for product in self.products:
+            self.spreads[product] = []
 
     def trade(self, trading_state: TradingState, orders: list):
-        order_depth = trading_state.order_depths[self.name]
+
+        # calculate the estimated value of each product, including basket
+        for product in self.products:
+            order_depth = trading_state.order_depths[product]
+
+            # calculate the variables needed for our linear regression
+            # 'mid_price_3','mid_price_2','mid_price_1','mid_price','imbalance_1','imbalance','spread_1','spread','vwap_1','vwap'
+
+            self.midprices[product].append(self.calculate_mid_price(order_depth))
+            if len(self.midprices[product]) > 4:
+                self.midprices[product].pop(0)
+
+            self.imbalances[product].append(self.calculate_imbalance(order_depth, product))
+            if len(self.imbalances[product]) > 2:
+                self.imbalances[product].pop(0)
+
+            self.spreads[product].append(self.calculate_spread(order_depth))
+            if len(self.spreads[product]) > 2:
+                self.spreads[product].pop(0)
+
+            if product != "GIFT_BASKET":
+                self.vwaps[product].append(self.calculate_vwap(trading_state, product))
+                if len(self.vwaps[product]) > 2:
+                    self.vwaps[product].pop(0)
+
+            self.estimated_values[product].append(self.calculate_fair_market_price(product))
 
         # first we find out the underlying value of the securities
-        underlying_value = self.calculate_basket_underlying_price(trading_state)
+        underlying_value = self.calculate_basket_underlying_price()
 
-        # Then we compare against the predicted fair value of the basket (can use ema10 or linear regression)
-        fair_value_of_basket = self.calculate_basket_fair_market_price(trading_state)
+        fair_value_of_basket = self.calculate_fair_market_price_basket()
 
         # then if the price of the securities is lower, we sell the basket. Also, if we have a short position of baskets already, buy the underlying securities and convert them  to the basket
         tot_basket_sell_volume = 0
@@ -499,7 +560,7 @@ class arbitrageStrategy(Strategy):
                     tot_basket_sell_volume += sell_volume
                     if tot_basket_sell_volume >= self.max_pos:
                         sell_volume = tot_basket_sell_volume - self.max_pos
-                    orders.append(Order(self.name, bid, -sell_volume))
+                    orders.append(Order("GIFT_BASKET", bid, -sell_volume))
 
 
         # If the price of the securities is lower, then we buy the basket. Also, if we have a large long position of baskets already, convert the basket to the underlying securities and sell them
@@ -511,61 +572,53 @@ class arbitrageStrategy(Strategy):
                 tot_basket_buy_volume += buy_volume
                 if tot_basket_buy_volume > self.max_pos:
                     buy_volume = tot_basket_buy_volume - self.max_pos
-                orders.append(Order(self.name, ask, buy_volume))
+                orders.append(Order("GIFT_BASKET", ask, buy_volume))
 
-    def calculate_basket_underlying_price(self, trading_state: TradingState):
-        '''
-        Calculate the real underlying price of the basket by calculating the value of the underlying assets:
-        4 chocolates, 6 strawberries & 1 rose
-        '''
-
-        strawberry_fair_price = self.calculate_strawberry_fair_market_price(trading_state)
-        chocolate_fair_price = self.calculate_chocolate_fair_market_price(trading_state)
-        roses_fair_price = self.calculate_rose_fair_market_price(trading_state)
-
-        return 4 * chocolate_fair_price + 6 * strawberry_fair_price + roses_fair_price
-
-    def calculate_strawberry_fair_market_price(self, trading_state: TradingState) -> float:
-        '''
-        This is where we will do the linear regression for strawberries.
-        For now, it just returns the midpoint
-        '''
-        order_depth = trading_state.order_depths[self.name]
-        midpoint = self.calculate_mid_price(order_depth)
-
-        return midpoint
-
-    def calculate_chocolate_fair_market_price(self, trading_state: TradingState) -> float:
-        '''
-        This is where we will do the linear regression for chocolates.
-        For now, it just returns the midpoint
-        '''
-        order_depth = trading_state.order_depths[self.name]
-        midpoint = self.calculate_mid_price(order_depth)
-
-        return midpoint
-
-    def calculate_rose_fair_market_price(self, trading_state: TradingState) -> float:
-        '''
-        This is where we will do the linear regression for roses.
-        For now, it just returns the midpoint
-        '''
-        order_depth = trading_state.order_depths[self.name]
-        midpoint = self.calculate_mid_price(order_depth)
-
-        return midpoint
-
-    def calculate_basket_fair_market_price(self, trading_state: TradingState):
+    def calculate_fair_market_price(self, product: str):
         '''
         This is where we will do the linear regression for the baskets.
         For now, it just returns the midpoint
         '''
+        intercept = self.intercepts[product]
+        coeff = self.coeffs[product]
 
-        order_depth = trading_state.order_depths[self.name]
+        features = []
 
-        midprice = self.calculate_mid_price(order_depth)
+        if len(self.midprices[product]) != 4 or len(self.imbalances[product]) != 2 or len(self.spreads[product]) != 2 or len(self.vwaps[product]) != 2:
+            return 0
 
-        return midprice
+        # ['mid_price_3','mid_price_2','mid_price_1','mid_price','imbalance_1','imbalance','spread_1','spread','vwap_1','vwap']
+        for midprice in self.midprices[product]:
+            features.append(midprice)
+        for imbalance in self.imbalances[product]:
+            features.append(imbalance)
+        for spread in self.spreads[product]:
+            features.append(spread)
+        for vwap in self.vwaps[product]:
+            features.append(vwap)
+
+        # Calculate fair price
+        fair_price = sum(np.multiply(features,coeff)) + intercept
+
+        return int(fair_price)
+
+    def calculate_fair_market_price_basket(self) -> int:
+        coeff = self.coeffs["GIFT_BASKET"]
+        intercept = 0
+
+        features = []
+        # ['mid_price','imbalance','spread','chocolate_predicted_price','strawberry_predicted_price','roses_predicted_price'
+        features.append(self.midprices["GIFT_BASKET"][-1])
+        features.append(self.imbalances["GIFT_BASKET"][-1])
+        features.append(self.spreads["GIFT_BASKET"][-1])
+        features.append(self.estimated_values["CHOCOLATE"][-1])
+        features.append(self.estimated_values["STRAWBERRIES"][-1])
+        features.append(self.estimated_values["ROSES"][-1])
+
+        # Calculate fair price
+        fair_price = sum(np.multiply(features,coeff)) + intercept
+
+        return int(fair_price)
 
     def calculate_mid_price(self, order_depth: OrderDepth) -> float:
 
@@ -579,13 +632,76 @@ class arbitrageStrategy(Strategy):
         return  (best_bid + best_ask)/2
 
 
+    def calculate_imbalance(self, order_depth: OrderDepth, product: str) -> float:
+        # Calculate the imbalance for the last days
+
+        bid_vol = sum(order_depth.buy_orders.values())
+        ask_vol = sum(order_depth.sell_orders.values())
+        if bid_vol + ask_vol == 0:
+            return 0
+        imbalance = (bid_vol + ask_vol)/ (bid_vol - ask_vol)
+
+        return imbalance
+
+
+    def calculate_vwap(self, state : TradingState, product: str):
+        """
+        Volume-Weighted Average Price
+        calculate from all the trades happened from last iteration
+        """
+
+        total_value = 0
+        total_volume = 0
+
+        # when there is not trad in the beginning
+        if product not in state.market_trades:
+            if self.vwaps[product] == []:
+                return self.calculate_mid_price(state.order_depths[product])
+            else:
+                return self.vwaps[product][-1]
+
+        market_trades = state.market_trades[product]
+
+        for trade in market_trades:
+            total_value += trade.price * trade.quantity
+            total_volume += trade.quantity
+
+        # Ensure we don't divide by zero in case of no trades
+        if total_volume != 0:
+            vwap = total_value / total_volume
+            return vwap
+        else:
+            return self.vwaps[product][-1]
+
+    def calculate_spread(self, order_depth: OrderDepth) -> float:
+
+        market_bids = order_depth.buy_orders
+
+        market_asks = order_depth.sell_orders
+
+        best_bid = max(market_bids)
+        best_ask = min(market_asks)
+        return  best_ask - best_bid
+
+    def calculate_basket_underlying_price(self):
+        '''
+        Calculate the real underlying price of the basket by calculating the value of the underlying assets:
+        4 chocolates, 6 strawberries & 1 rose
+        '''
+
+        strawberry_fair_price = self.estimated_values["STRAWBERRIES"][-1]
+        chocolate_fair_price = self.estimated_values["CHOCOLATE"][-1]
+        roses_fair_price = self.estimated_values["ROSES"][-1]
+
+        return 4 * chocolate_fair_price + 6 * strawberry_fair_price + roses_fair_price
+
 
 ##############################################################################################
 ### RegressionStrategy, using regression to find the best fair price
 ##############################################################################################
 
 class RegressionStrategy(Strategy):
-    def __init__(self, name: str, min_req_price_difference: int, max_position: int):
+    def __init__(self, name: str, min_req_price_difference: int, max_position: int, intercept, coef):
         super().__init__(name, max_position)
 
         self.prices = []
@@ -608,8 +724,8 @@ class RegressionStrategy(Strategy):
         self.old_bids = []
 
         self.min_req_price_difference = min_req_price_difference
-        self.intercept = 1.2389442725070694
-        self.coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
+        self.intercept = intercept
+        self.coef = coef
         self.mm = StoikovMarketMaker(0.23348603634235995, 1.966874725882954, 0, 20)
 
     def trade(self, trading_state: TradingState, orders: list):
@@ -894,7 +1010,10 @@ class RegressionStrategy(Strategy):
 ##############################################################################################
 class Starfruit(RegressionStrategy):
     def __init__(self):
-        super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20)
+        super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20,
+                         intercept = 1.2389442725070694,
+                         coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
+                         )
 
 class Amethysts(FixedStrategy2):
     def __init__(self):
@@ -904,10 +1023,40 @@ class Orchids(ObservationStrategy):
     def __init__(self):
         super().__init__("ORCHIDS", max_position=20)
 
-class Baskets(arbitrageStrategy):
+class Baskets(ArbitrageStrategy):
     def __init__(self):
-        super().__init__("BASKETS", min_req_price_difference=3, max_position=20)
+        super().__init__("GIFT_BASKET", min_req_price_difference=3, max_position=20)
 
+# class Chocolate(RegressionStrategy):
+#     def __init__(self):
+#         super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250,
+#                          intercept = 0,
+#                          coef = [-0.00437733,  0.00308218,  0.01752576,  0.98360442, -0.90183322,
+#                                 -2.79369535,  0.02711808, -0.00315843,  0.11274011, -0.11258077]
+#                         )
+# class Roses(RegressionStrategy):
+#     def __init__(self):
+#         super().__init__("ROSES", min_req_price_difference=3, max_position=60,
+#                          intercept = 0,
+#                          coef = [-0.00981411,  0.00393729,  0.01444269,  0.99055514, -0.0615577 ,
+#                                     -0.3335764 ,  0.03956394, -0.04242976, -0.07749774,  0.07836905]
+#                          )
+# class Strawberries(RegressionStrategy):
+#     def __init__(self):
+#         super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350,
+#                          intercept = 0,
+#                          coef = [-0.01862957,  0.0360459 ,  0.11510304,  0.86723537, -0.04803083,
+#                                 -1.15100102, -0.00741988, -0.02239479, -0.00789983,  0.0081571 ]
+#                         )
+class Chocolate(DiffStrategy):
+    def __init__(self):
+        super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250)
+class Roses(DiffStrategy):
+    def __init__(self):
+        super().__init__("ROSES", min_req_price_difference=3, max_position=60)
+class Strawberries(DiffStrategy):
+    def __init__(self):
+        super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350,)
 ##############################################################################################
 ### Trader Class
 ##############################################################################################
@@ -915,10 +1064,13 @@ class Trader:
 
     def __init__(self) -> None:
         self.products = {
-            "STARFRUIT": Starfruit(),
-            "AMETHYSTS": Amethysts(),
-            "ORCHIDS": Orchids(),
-            "BASKETS": Baskets()
+            # "STARFRUIT": Starfruit(),
+            # "AMETHYSTS": Amethysts(),
+            # "ORCHIDS": Orchids(),
+            "GIFT_BASKET": Baskets(),
+            # "CHOCOLATE": Chocolate(),
+            # "ROSES": Roses(),
+            # "STRAWBERRIES": Strawberries()
         }
         self.logger = Logger()
 
@@ -947,12 +1099,13 @@ class Trader:
                 result[product] = orders
                 # !!!!!!!!!! #
 
+        result["GIFT_BASKET"].append(self.products["GIFT_BASKET"].get_orders())
         traderData = ""
 
 		# Sample conversion request.
         orchids_position = state.position.get("ORCHIDS", 0)
-        conversions = self.products["ORCHIDS"].conversion(state, orchids_position)
-
+        # conversions = self.products["ORCHIDS"].conversion(state, orchids_position)
+        conversions = 0
         self.logger.flush(state, result, conversions, traderData)
 
         return result, conversions, ""
@@ -1111,3 +1264,92 @@ class StoikovMarketMaker:
         bid_price = midpoint - spread / 2
         ask_price = midpoint + spread / 2
         return round(bid_price), round(ask_price)
+##############################################################################################
+### BASKET STRATEGY
+##############################################################################################
+    
+class BasketStrategy(Strategy):
+    def __init__(self, name: str, max_pos: int):
+        super().__init__(name, max_pos)
+        self.amethysts_price = 10000
+        self.position = {'CHOCOLATE' : 0, 'ROSES' : 0, 'STRAWBERRIES' : 0, 'BASKETS' : 0}
+        self.position_limit = {'CHOCOLATE' : 250, 'ROSES' : 60, 'STRAWBERRIES' : 350, 'BASKETS' : 20}
+        self.orders = {'CHOCOLATE' : [], 'ROSES': [], 'STRAWBERRIES' : [], 'BASKETS' : []}
+        self.prods = ['CHOCOLATE', 'ROSES', 'STRAWBERRIES', 'BASKETS']
+        self.osell = {}
+        self.obuy = {}
+        self.best_sell = {}
+        self.best_buy = {}
+        self.worst_sell = {}
+        self.worst_buy = {}
+        self.mid_price = {}
+        self.vol_buy = {}
+        self.vol_sell = {}
+        self.basket_std = 76 # the std of the diff
+        
+    def trade(self, trading_state: TradingState, orders: list):
+        order_depth: OrderDepth = trading_state.order_depths[self.name]
+        # Check if there are any SELL orders
+        bid_volume = self.max_pos - self.prod_position
+        ask_volume = -self.max_pos - self.prod_position
+
+        orders.append(Order(self.name, self.amethysts_price - 1, bid_volume))
+        orders.append(Order(self.name, self.amethysts_price + 1, ask_volume))
+        for p in self.prods:
+            self.osell[p] = collections.OrderedDict(sorted(order_depth[p].sell_orders.items()))
+            self.obuy[p] = collections.OrderedDict(sorted(order_depth[p].buy_orders.items(), reverse=True))
+
+            self.best_sell[p] = next(iter(self.osell[p]))
+            self.best_buy[p] = next(iter(self.obuy[p]))
+
+            self.worst_sell[p] = next(reversed(self.osell[p]))
+            self.worst_buy[p] = next(reversed(self.obuy[p]))
+
+            self.mid_price[p] = (self.best_sell[p] + self.best_buy[p])/2
+            self.vol_buy[p], self.vol_sell[p] = 0, 0
+            for price, vol in self.obuy[p].items():
+                self.vol_buy[p] += vol 
+                if self.vol_buy[p] >= self.position_limit[p]/10:
+                    break
+            for price, vol in self.osell[p].items():
+                self.vol_sell[p] += -vol 
+                if self.vol_sell[p] >= self.position_limit[p]/10:
+                    break
+        # the residual is the difference minus the mean 
+        res_buy = self.mid_price['GIFT_BASKET'] - self.mid_price['CHOCOLATE']*4 - self.mid_price['STRAWBERRIES']*6 - self.mid_price['ROSES'] - 379.49
+        res_sell = self.mid_price['GIFT_BASKET'] - self.mid_price['CHOCOLATE']*4 - self.mid_price['STRAWBERRIES']*6 - self.mid_price['ROSES'] - 379.49
+        trade_at = self.basket_std*0.5
+        close_at = self.basket_std*(-1000)
+        pb_pos = self.position['GIFT_BASKET']
+        pb_neg = self.position['GIFT_BASKET']        
+        basket_buy_sig = 0
+        basket_sell_sig = 0
+        
+        if self.position['GIFT_BASKET'] == self.POSITION_LIMIT['GIFT_BASKET']:
+            self.cont_buy_basket_unfill = 0
+        if self.position['GIFT_BASKET'] == -self.POSITION_LIMIT['GIFT_BASKET']:
+            self.cont_sell_basket_unfill = 0
+        do_bask = 0
+        
+        if res_sell > trade_at:
+            vol = self.position['GIFT_BASKET'] + self.POSITION_LIMIT['GIFT_BASKET']
+            self.cont_buy_basket_unfill = 0 # no need to buy rn
+            assert(vol >= 0)
+            if vol > 0:
+                do_bask = 1
+                basket_sell_sig = 1
+                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', self.worst_buy['GIFT_BASKET'], -vol)) 
+                self.cont_sell_basket_unfill += 2
+                pb_neg -= vol    
+        elif res_buy < -trade_at:
+            vol = self.POSITION_LIMIT['GIFT_BASKET'] - self.position['GIFT_BASKET']
+            self.cont_sell_basket_unfill = 0 # no need to sell rn
+            assert(vol >= 0)
+            if vol > 0:
+                do_bask = 1
+                basket_buy_sig = 1
+                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', self.worst_sell['GIFT_BASKET'], vol))
+                self.cont_buy_basket_unfill += 2
+                pb_pos += vol    
+    
+        return orders
