@@ -13,6 +13,8 @@ ipykernel = "*"
 scikit-learn="*"
 prosperity2bt="*"
 prosperity2submit="*"
+optuna="*"
+statsmodels="*"
 
 [dev-packages]
 
