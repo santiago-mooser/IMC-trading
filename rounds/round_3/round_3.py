@@ -1083,7 +1083,6 @@ class StoikovMarketMaker:
 class BasketStrategy(Strategy):
     def __init__(self, name: str, max_pos: int):
         super().__init__(name, max_pos)
-        self.amethysts_price = 10000
         self.position = {'CHOCOLATE' : 0, 'ROSES' : 0, 'STRAWBERRIES' : 0, 'GIFT_BASKET' : 0}
         self.position_limit = {'CHOCOLATE' : 250, 'ROSES' : 60, 'STRAWBERRIES' : 350, 'GIFT_BASKET' : 20}
         self.orders = {'CHOCOLATE' : [], 'ROSES': [], 'STRAWBERRIES' : [], 'GIFT_BASKET' : []}
@@ -1100,16 +1099,14 @@ class BasketStrategy(Strategy):
         self.basket_std = 76 # the std of the diff
 
     def trade(self, trading_state: TradingState, orders: list):
-        order_depth: OrderDepth = trading_state.order_depths[self.name]
+        order_depth: OrderDepth = trading_state.order_depths
         # Check if there are any SELL orders
         bid_volume = self.max_pos - self.prod_position
         ask_volume = -self.max_pos - self.prod_position
 
-        orders.append(Order(self.name, self.amethysts_price - 1, bid_volume))
-        orders.append(Order(self.name, self.amethysts_price + 1, ask_volume))
         for p in self.prods:
-            self.osell[p] = collections.OrderedDict(sorted(order_depth.sell_orders.items()))
-            self.obuy[p] = collections.OrderedDict(sorted(order_depth.buy_orders.items(), reverse=True))
+            self.osell[p] = collections.OrderedDict(sorted(order_depth[p].sell_orders.items()))
+            self.obuy[p] = collections.OrderedDict(sorted(order_depth[p].buy_orders.items(), reverse=True))
 
             self.best_sell[p] = next(iter(self.osell[p]))
             self.best_buy[p] = next(iter(self.obuy[p]))
@@ -1133,7 +1130,9 @@ class BasketStrategy(Strategy):
         # the residual is the difference minus the mean
         res_buy = self.mid_price['GIFT_BASKET'] - self.mid_price['CHOCOLATE']*4 - self.mid_price['STRAWBERRIES']*6 - self.mid_price['ROSES'] - 379.49
         res_sell = self.mid_price['GIFT_BASKET'] - self.mid_price['CHOCOLATE']*4 - self.mid_price['STRAWBERRIES']*6 - self.mid_price['ROSES'] - 379.49
-        trade_at = self.basket_std*0.5
+        
+        res = self.mid_price['GIFT_BASKET'] - self.mid_price['CHOCOLATE']*4 - self.mid_price['STRAWBERRIES']*6 - self.mid_price['ROSES'] - 379.49
+        trade_at = self.basket_std *0.5
         close_at = self.basket_std*(-1000)
         pb_pos = self.position['GIFT_BASKET']
         pb_neg = self.position['GIFT_BASKET']
@@ -1176,24 +1175,28 @@ class BasketStrategy(Strategy):
 ##############################################################################################
 ### Apply strategy to products
 ##############################################################################################
-class Starfruit(RegressionStrategy):
-    def __init__(self):
-        super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20,
-                         intercept = 1.2389442725070694,
-                         coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
-                         )
+# class Starfruit(RegressionStrategy):
+#     def __init__(self):
+#         super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20,
+#                          intercept = 1.2389442725070694,
+#                          coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
+#                          )
 
-class Amethysts(FixedStrategy2):
-    def __init__(self):
-        super().__init__("AMETHYSTS", max_pos=20)
+# class Amethysts(FixedStrategy2):
+#     def __init__(self):
+#         super().__init__("AMETHYSTS", max_pos=20)
 
-class Orchids(ObservationStrategy):
-    def __init__(self):
-        super().__init__("ORCHIDS", max_position=20)
+# class Orchids(ObservationStrategy):
+#     def __init__(self):
+#         super().__init__("ORCHIDS", max_position=20)
 
-class Baskets(ArbitrageStrategy):
+# class Baskets(ArbitrageStrategy):
+#     def __init__(self):
+#         super().__init__("GIFT_BASKET", min_req_price_difference=3, max_position=20)
+
+class Baskets(BasketStrategy):
     def __init__(self):
-        super().__init__("GIFT_BASKET", min_req_price_difference=3, max_position=20)
+        super().__init__("GIFT_BASKET",  max_pos=20)
 
 # class Chocolate(RegressionStrategy):
 #     def __init__(self):
@@ -1216,15 +1219,15 @@ class Baskets(ArbitrageStrategy):
 #                          coef = [-0.01862957,  0.0360459 ,  0.11510304,  0.86723537, -0.04803083,
 #                                 -1.15100102, -0.00741988, -0.02239479, -0.00789983,  0.0081571 ]
 #                         )
-class Chocolate(DiffStrategy):
-    def __init__(self):
-        super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250)
-class Roses(DiffStrategy):
-    def __init__(self):
-        super().__init__("ROSES", min_req_price_difference=3, max_position=60)
-class Strawberries(DiffStrategy):
-    def __init__(self):
-        super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350,)
+# class Chocolate(DiffStrategy):
+#     def __init__(self):
+#         super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250)
+# class Roses(DiffStrategy):
+#     def __init__(self):
+#         super().__init__("ROSES", min_req_price_difference=3, max_position=60)
+# class Strawberries(DiffStrategy):
+#     def __init__(self):
+#         super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350,)
 ##############################################################################################
 ### Trader Class
 ##############################################################################################
