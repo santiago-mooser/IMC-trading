@@ -1226,9 +1226,9 @@ class Trader:
 
     def __init__(self) -> None:
         self.products = {
-            # "STARFRUIT": Starfruit(),
-            # "AMETHYSTS": Amethysts(),
-            # "ORCHIDS": Orchids(),
+            "STARFRUIT": Starfruit(),
+            "AMETHYSTS": Amethysts(),
+            "ORCHIDS": Orchids(),
             "GIFT_BASKET": Baskets(),
             # "CHOCOLATE": Chocolate(),
             # "ROSES": Roses(),
@@ -1265,8 +1265,8 @@ class Trader:
 
 		# Sample conversion request.
         orchids_position = state.position.get("ORCHIDS", 0)
-        # conversions = self.products["ORCHIDS"].conversion(state, orchids_position)
-        conversions = 0
+        conversions = self.products["ORCHIDS"].conversion(state, orchids_position)
+        # conversions = 0
         self.logger.flush(state, result, conversions, traderData)
 
         return result, conversions, ""
