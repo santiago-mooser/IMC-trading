@@ -1175,20 +1175,20 @@ class BasketStrategy(Strategy):
 ##############################################################################################
 ### Apply strategy to products
 ##############################################################################################
-# class Starfruit(RegressionStrategy):
-#     def __init__(self):
-#         super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20,
-#                          intercept = 1.2389442725070694,
-#                          coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
-#                          )
+class Starfruit(RegressionStrategy):
+    def __init__(self):
+        super().__init__("STARFRUIT", min_req_price_difference=3, max_position=20,
+                         intercept = 1.2389442725070694,
+                         coef = [ 0.15033769,  0.17131938,  0.28916903,  0.37856112, -2.27925121, -3.1545027 ,  0.01490655,  0.0156036 ,  0.03238973, -0.02205384]
+                         )
 
-# class Amethysts(FixedStrategy2):
-#     def __init__(self):
-#         super().__init__("AMETHYSTS", max_pos=20)
+class Amethysts(FixedStrategy2):
+    def __init__(self):
+        super().__init__("AMETHYSTS", max_pos=20)
 
-# class Orchids(ObservationStrategy):
-#     def __init__(self):
-#         super().__init__("ORCHIDS", max_position=20)
+class Orchids(ObservationStrategy):
+    def __init__(self):
+        super().__init__("ORCHIDS", max_position=20)
 
 # class Baskets(ArbitrageStrategy):
 #     def __init__(self):
@@ -1219,15 +1219,6 @@ class Baskets(BasketStrategy):
 #                          coef = [-0.01862957,  0.0360459 ,  0.11510304,  0.86723537, -0.04803083,
 #                                 -1.15100102, -0.00741988, -0.02239479, -0.00789983,  0.0081571 ]
 #                         )
-# class Chocolate(DiffStrategy):
-#     def __init__(self):
-#         super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250)
-# class Roses(DiffStrategy):
-#     def __init__(self):
-#         super().__init__("ROSES", min_req_price_difference=3, max_position=60)
-# class Strawberries(DiffStrategy):
-#     def __init__(self):
-#         super().__init__("STRAWBERRIES", min_req_price_difference=3, max_position=350,)
 ##############################################################################################
 ### Trader Class
 ##############################################################################################
