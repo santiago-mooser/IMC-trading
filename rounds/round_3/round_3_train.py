@@ -1220,9 +1220,15 @@ class Baskets(BasketStrategy):
 #                          coef = [-0.01862957,  0.0360459 ,  0.11510304,  0.86723537, -0.04803083,
 #                                 -1.15100102, -0.00741988, -0.02239479, -0.00789983,  0.0081571 ]
 #                         )
-# class Chocolate(DiffStrategy):
-#     def __init__(self):
-#         super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250)
+class Chocolate(DiffStrategy):
+    def __init__(self, der_res, diff_thresh):
+        super().__init__("CHOCOLATE", max_position=250, derivative_resolution=der_res, diff_thresh=diff_thresh)
+class Roses(DiffStrategy):
+    def __init__(self, der_res, diff_thresh):
+        super().__init__("ROSES", max_position=60, derivative_resolution=der_res, diff_thresh=diff_thresh)
+class Strawberries(DiffStrategy):
+    def __init__(self, der_res, diff_thresh):
+        super().__init__("STRAWBERRIES", max_position=350, derivative_resolution=der_res, diff_thresh=diff_thresh)
 # class Roses(DiffStrategy):
 #     def __init__(self):
 #         super().__init__("ROSES", min_req_price_difference=3, max_position=60)
@@ -1234,15 +1240,15 @@ class Baskets(BasketStrategy):
 ##############################################################################################
 class Trader:
 
-    def __init__(self,multiper) -> None:
+    def __init__(self,multiper, der_res, diff_thresh) -> None:
         self.products = {
             # "STARFRUIT": Starfruit(),
             # "AMETHYSTS": Amethysts(),
             # "ORCHIDS": Orchids(),
-            "GIFT_BASKET": Baskets(multiper),
-            # "CHOCOLATE": Chocolate(),
-            # "ROSES": Roses(),
-            # "STRAWBERRIES": Strawberries()
+            # "GIFT_BASKET": Baskets(multiper),
+            # "CHOCOLATE": Chocolate(der_res, diff_thresh),
+            # "ROSES": Roses(der_res, diff_thresh),
+            "STRAWBERRIES": Strawberries(der_res, diff_thresh)
         }
         self.logger = Logger()
 

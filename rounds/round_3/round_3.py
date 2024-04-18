@@ -1198,13 +1198,16 @@ class Baskets(BasketStrategy):
     def __init__(self):
         super().__init__("GIFT_BASKET",  max_pos=20)
 
-# class Chocolate(RegressionStrategy):
+class Chocolate(DiffStrategy):
+    def __init__(self):
+        super().__init__("CHOCOLATE", max_position=250, derivative_resolution=150, diff_thresh=30)
+# class Roses(DiffStrategy):
 #     def __init__(self):
-#         super().__init__("CHOCOLATE", min_req_price_difference=3, max_position=250,
-#                          intercept = 0,
-#                          coef = [-0.00437733,  0.00308218,  0.01752576,  0.98360442, -0.90183322,
-#                                 -2.79369535,  0.02711808, -0.00315843,  0.11274011, -0.11258077]
-#                         )
+#         super().__init__("ROSES", max_position=250, derivative_resolution=150, diff_thresh=30)
+# class Strawberries(DiffStrategy):
+#     def __init__(self):
+#         super().__init__("STRAWBERRIES", max_position=250, derivative_resolution=150, diff_thresh=30)
+
 # class Roses(RegressionStrategy):
 #     def __init__(self):
 #         super().__init__("ROSES", min_req_price_difference=3, max_position=60,
@@ -1230,7 +1233,7 @@ class Trader:
             "AMETHYSTS": Amethysts(),
             "ORCHIDS": Orchids(),
             "GIFT_BASKET": Baskets(),
-            # "CHOCOLATE": Chocolate(),
+            "CHOCOLATE": Chocolate(),
             # "ROSES": Roses(),
             # "STRAWBERRIES": Strawberries()
         }
