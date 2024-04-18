@@ -1081,7 +1081,7 @@ class StoikovMarketMaker:
 ##############################################################################################
 
 class BasketStrategy(Strategy):
-    def __init__(self, name: str, max_pos: int):
+    def __init__(self, name: str, max_pos: int, multiper):
         super().__init__(name, max_pos)
         self.position = {'CHOCOLATE' : 0, 'ROSES' : 0, 'STRAWBERRIES' : 0, 'GIFT_BASKET' : 0}
         self.position_limit = {'CHOCOLATE' : 250, 'ROSES' : 60, 'STRAWBERRIES' : 350, 'GIFT_BASKET' : 20}
@@ -1097,6 +1097,7 @@ class BasketStrategy(Strategy):
         self.vol_buy = {}
         self.vol_sell = {}
         self.basket_std = 76 # the std of the diff
+        self.multiper = multiper
 
     def trade(self, trading_state: TradingState, orders: list):
         order_depth: OrderDepth = trading_state.order_depths
@@ -1132,7 +1133,7 @@ class BasketStrategy(Strategy):
         res_sell = self.mid_price['GIFT_BASKET'] - self.mid_price['CHOCOLATE']*4 - self.mid_price['STRAWBERRIES']*6 - self.mid_price['ROSES'] - 379.49
         
         res = self.mid_price['GIFT_BASKET'] - self.mid_price['CHOCOLATE']*4 - self.mid_price['STRAWBERRIES']*6 - self.mid_price['ROSES'] - 379.49
-        trade_at = self.basket_std * 0.4
+        trade_at = self.basket_std * self.multiper
         close_at = self.basket_std*(-1000)
         pb_pos = self.position['GIFT_BASKET']
         pb_neg = self.position['GIFT_BASKET']
@@ -1195,8 +1196,8 @@ class BasketStrategy(Strategy):
 #         super().__init__("GIFT_BASKET", min_req_price_difference=3, max_position=20)
 
 class Baskets(BasketStrategy):
-    def __init__(self):
-        super().__init__("GIFT_BASKET",  max_pos=20)
+    def __init__(self, multiper):
+        super().__init__("GIFT_BASKET",  max_pos=20, multiper = multiper)
 
 # class Chocolate(RegressionStrategy):
 #     def __init__(self):
@@ -1233,12 +1234,12 @@ class Baskets(BasketStrategy):
 ##############################################################################################
 class Trader:
 
-    def __init__(self) -> None:
+    def __init__(self,multiper) -> None:
         self.products = {
             # "STARFRUIT": Starfruit(),
             # "AMETHYSTS": Amethysts(),
             # "ORCHIDS": Orchids(),
-            "GIFT_BASKET": Baskets(),
+            "GIFT_BASKET": Baskets(multiper),
             # "CHOCOLATE": Chocolate(),
             # "ROSES": Roses(),
             # "STRAWBERRIES": Strawberries()
