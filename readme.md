@@ -1,13 +1,27 @@
+# IMC-trading
+
+This repository is the code used by our team, Quant Crusaders, in IMC's prosperity trading competition.'
+
+
+
+# What files to look at for reference
+
+Data analysis: [rounds/round_3/analysis.ipyb](https://github.com/santiago-mooser/IMC-trading/blob/main/rounds/round_3/analysis.ipynb)
+
+Strategy implementation: [rounds/round_3/round_3.py](https://github.com/santiago-mooser/IMC-trading/blob/main/rounds/round_3/round_3.py)
+
+Some writeup: [rounds/round_2/writeup.md](https://github.com/santiago-mooser/IMC-trading/blob/main/rounds/round_2/writeup.md)
+
+
+# Notes during the challange
+
 Coding info:
 https://imc-prosperity.notion.site/Writing-an-Algorithm-in-Python-658e233a26e24510bfccf0b1df647858
-
 
 Useful stuff:
 
 ## Previous events search:
 https://duckduckgo.com/?t=ffab&q=site%3Agithub.com+imc+prospoerity+page&ia=web
- 
-# 
 
 ## Potential market-making strategies:
 https://github.com/Andrew-Lloy/Optimal-HFT-Guilbaud-Pham/blob/main/1106.5040.pdf
